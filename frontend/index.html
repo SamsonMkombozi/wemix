@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WEMIX — Global News Market</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  /* ----------------------------------------------------------------------
+     WEMIX homepage -- scoped entirely to this page. Deliberately a
+     separate palette/component set from the shared gold/black design
+     tokens in css/style.css (used by every other page), so none of this
+     affects login/dashboard/moderator/listing. Only .spinner, .hidden,
+     .text-muted and similar plain utilities are reused from there.
+     ---------------------------------------------------------------------- */
+  :root {
+    --wm-navy: #0d1b3d;
+    --wm-navy-2: #16265a;
+    --wm-red: #e63946;
+    --wm-blue: #2f6fed;
+    --wm-text: #14141f;
+    --wm-muted: #6b7280;
+    --wm-bg-alt: #f6f7fb;
+    --wm-border: #e7e9f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Poppins', sans-serif; color: var(--wm-text); background: #fff; }
+  a { text-decoration: none; color: inherit; }
+  .wm-wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+  .wm-hidden { display: none !important; }
+
+  /* Utility bar */
+  .wm-utility-bar { background: var(--wm-navy); color: #cdd6f0; font-size: 0.78rem; }
+  .wm-utility-bar .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; flex-wrap: wrap; gap: 6px; }
+  .wm-utility-left { display: flex; align-items: center; gap: 16px; }
+  .wm-utility-right { display: flex; align-items: center; gap: 16px; }
+  .wm-utility-right a { opacity: 0.85; }
+  .wm-utility-right a:hover { opacity: 1; }
+  .wm-social-icons { display: flex; gap: 10px; margin-left: 6px; }
+  .wm-social-icons a { display: flex; align-items: center; justify-content: center; }
+  .wm-social-icons svg { width: 14px; height: 14px; }
+
+  /* Main header */
+  .wm-main-header { background: #fff; border-bottom: 1px solid var(--wm-border); }
+  .wm-main-header .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; gap: 24px; flex-wrap: wrap; }
+  .wm-logo { display: flex; flex-direction: column; }
+  .wm-logo img { height: 38px; display: block; }
+  .wm-logo-fallback { font-family: 'Poppins', sans-serif; font-weight: 800; font-size: 1.7rem; letter-spacing: -0.02em; color: var(--wm-navy); }
+  .wm-logo-fallback span { color: var(--wm-blue); }
+  .wm-logo-tag { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--wm-muted); margin-top: 2px; }
+
+  .wm-search-wrap { flex: 1; min-width: 240px; max-width: 460px; display: flex; }
+  .wm-search-wrap input { flex: 1; border: 1px solid var(--wm-border); border-right: none; border-radius: 6px 0 0 6px; padding: 10px 14px; font-size: 0.85rem; font-family: inherit; }
+  .wm-search-wrap select { border: 1px solid var(--wm-border); border-left: none; border-right: none; padding: 10px 10px; font-size: 0.82rem; font-family: inherit; background: #fafafa; max-width: 130px; }
+  .wm-search-wrap button { border: none; background: var(--wm-navy); color: #fff; padding: 0 16px; border-radius: 0 6px 6px 0; cursor: pointer; }
+
+  .wm-header-actions { display: flex; align-items: center; gap: 18px; }
+  .wm-icon-link { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 0.68rem; color: var(--wm-muted); font-weight: 600; }
+  .wm-icon-link svg { width: 18px; height: 18px; }
+  .wm-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--wm-red); display: inline-block; margin-right: 3px; }
+  .wm-signin-btn { background: var(--wm-navy); color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: inherit; }
+  .wm-signin-btn:hover { background: var(--wm-navy-2); }
+  .wm-user-chip { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; }
+  .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
+
+  /* Main nav */
+  .wm-main-nav { background: var(--wm-navy); }
+  .wm-main-nav .wm-wrap { display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  .wm-main-nav .wm-wrap::-webkit-scrollbar { display: none; }
+  .wm-nav-hamburger { display: flex; align-items: center; padding: 13px 14px 13px 0; color: #dfe5f7; cursor: pointer; flex-shrink: 0; }
+  .wm-nav-hamburger svg { width: 18px; height: 18px; }
+  .wm-nav-link { color: #dfe5f7; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.03em; padding: 13px 14px; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
+  .wm-nav-link:hover, .wm-nav-link.active { color: #fff; border-bottom-color: var(--wm-red); }
+  .wm-nav-more { position: relative; margin-left: auto; flex-shrink: 0; }
+  .wm-nav-more-dropdown { display: none; position: absolute; top: 100%; right: 0; background: #fff; border: 1px solid var(--wm-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 180px; z-index: 20; padding: 6px 0; }
+  .wm-nav-more-dropdown.wm-open { display: block; }
+  .wm-nav-more-dropdown .wm-nav-link { display: block; color: var(--wm-text); padding: 9px 16px; border-bottom: none; }
+  .wm-nav-more-dropdown .wm-nav-link:hover { color: var(--wm-blue); }
+
+  /* Breaking ticker */
+  .wm-breaking-bar { background: #fff; border-bottom: 1px solid var(--wm-border); display: flex; align-items: stretch; }
+  .wm-breaking-tag { background: var(--wm-red); color: #fff; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.05em; padding: 9px 16px; display: flex; align-items: center; white-space: nowrap; }
+  .wm-breaking-track-wrap { flex: 1; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; }
+  .wm-breaking-track { font-size: 0.8rem; color: var(--wm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wm-breaking-track span:not(:last-child)::after { content: '•'; margin: 0 14px; color: var(--wm-red); }
+  .wm-breaking-nav { display: flex; gap: 6px; flex-shrink: 0; }
+  .wm-breaking-nav button { width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--wm-navy); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+  .wm-breaking-nav button:disabled { opacity: 0.35; cursor: default; }
+  .wm-breaking-nav svg { width: 12px; height: 12px; }
+
+  /* Sections */
+  .wm-section { padding: 32px 0; }
+  .wm-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .wm-section-title { font-size: 0.95rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wm-text); }
+  .wm-view-all { font-size: 0.78rem; font-weight: 600; color: var(--wm-blue); }
+
+  /* Hero */
+  .wm-hero-grid { display: grid; grid-template-columns: 1.7fr 1fr; gap: 24px; align-items: start; }
+  .wm-hero-card { position: relative; border-radius: 10px; overflow: hidden; min-height: 420px; background: linear-gradient(135deg, var(--wm-navy), #1c2f66); display: flex; align-items: flex-end; }
+  .wm-hero-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .wm-hero-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,8,20,0.88), rgba(5,8,20,0.15) 60%); }
+  .wm-hero-content { position: relative; z-index: 1; padding: 28px; color: #fff; }
+  .wm-hero-tag { display: inline-block; background: var(--wm-blue); color: #fff; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; padding: 5px 12px; border-radius: 4px; margin-bottom: 12px; }
+  .wm-hero-content h1 { font-size: 1.9rem; font-weight: 700; margin: 0 0 10px 0; line-height: 1.25; max-width: 640px; }
+  .wm-hero-content p { font-size: 0.9rem; color: #d5dbef; max-width: 560px; margin: 0 0 14px 0; }
+  .wm-hero-meta { font-size: 0.78rem; color: #b7c0e0; }
+  .wm-hero-dots { display: flex; gap: 6px; margin-top: 14px; }
+  .wm-hero-dot { width: 20px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.4); cursor: pointer; }
+  .wm-hero-dot.active { background: #fff; }
+  .wm-hero-next-btn { position: absolute; z-index: 2; top: 50%; right: 16px; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%; border: none; background: rgba(13,27,61,0.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .wm-hero-next-btn:hover { background: rgba(13,27,61,0.8); }
+  .wm-hero-next-btn svg { width: 16px; height: 16px; }
+
+  .wm-latest-list { display: flex; flex-direction: column; gap: 14px; }
+  .wm-latest-item { display: flex; gap: 10px; align-items: flex-start; }
+  .wm-latest-thumb { width: 64px; height: 48px; min-width: 64px; border-radius: 6px; background: var(--wm-bg-alt); overflow: hidden; }
+  .wm-latest-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-latest-cat { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em; color: var(--wm-blue); text-transform: uppercase; }
+  .wm-latest-time { font-size: 0.68rem; color: var(--wm-muted); float: right; }
+  .wm-latest-title { font-size: 0.82rem; font-weight: 600; line-height: 1.3; margin-top: 2px; }
+
+  /* Top categories */
+  .wm-cat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
+  .wm-cat-item { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 6px; cursor: pointer; }
+  .wm-cat-item:hover .wm-cat-icon, .wm-cat-item:hover .wm-cat-label { color: var(--wm-blue); }
+  .wm-cat-icon { width: 26px; height: 26px; color: var(--wm-navy); }
+  .wm-cat-label { font-size: 0.75rem; font-weight: 600; }
+
+  /* Editor's picks */
+  .wm-picks-grid { display: grid; grid-template-columns: repeat(3, 1fr) 1fr; gap: 20px; }
+  .wm-pick-card-media { height: 150px; border-radius: 8px; overflow: hidden; background: var(--wm-bg-alt); margin-bottom: 10px; }
+  .wm-pick-card-media img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-pick-cat { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; color: var(--wm-blue); text-transform: uppercase; }
+  .wm-pick-title { font-size: 0.98rem; font-weight: 700; margin: 6px 0; line-height: 1.3; }
+  .wm-pick-desc { font-size: 0.8rem; color: var(--wm-muted); margin: 0 0 8px 0; }
+  .wm-pick-time { font-size: 0.72rem; color: var(--wm-muted); }
+
+  .wm-live-box { background: var(--wm-navy); border-radius: 10px; padding: 24px 20px; color: #fff; display: flex; flex-direction: column; justify-content: space-between; min-height: 240px; }
+  .wm-live-logo { font-weight: 800; font-size: 1.3rem; }
+  .wm-live-logo span { color: var(--wm-red); }
+  .wm-live-desc { font-size: 0.82rem; color: #c7cfe8; margin: 10px 0 16px 0; }
+  .wm-watch-btn { background: var(--wm-red); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; width: fit-content; }
+
+  /* Trending + around */
+  .wm-trend-around-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 28px; }
+  .wm-trend-item { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+  .wm-trend-num { width: 24px; height: 24px; border-radius: 50%; background: var(--wm-navy); color: #fff; font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .wm-trend-thumb { width: 52px; height: 40px; border-radius: 6px; background: var(--wm-bg-alt); overflow: hidden; flex-shrink: 0; }
+  .wm-trend-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-trend-title { font-size: 0.82rem; font-weight: 600; line-height: 1.3; }
+  .wm-trend-time { font-size: 0.7rem; color: var(--wm-muted); }
+
+  .wm-around-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
+  .wm-around-card-media { height: 100px; border-radius: 8px; overflow: hidden; background: var(--wm-bg-alt); margin-bottom: 8px; }
+  .wm-around-card-media img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-around-loc { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; color: var(--wm-blue); text-transform: uppercase; }
+  .wm-around-title { font-size: 0.82rem; font-weight: 600; margin: 4px 0; line-height: 1.3; }
+  .wm-around-time { font-size: 0.7rem; color: var(--wm-muted); }
+
+  /* Newsletter */
+  .wm-newsletter-bar { background: var(--wm-navy); border-radius: 10px; padding: 20px 26px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: #fff; }
+  .wm-newsletter-left { display: flex; align-items: center; gap: 14px; }
+  .wm-newsletter-icon { width: 40px; height: 40px; border-radius: 50%; background: var(--wm-blue); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .wm-newsletter-title { font-weight: 700; font-size: 0.95rem; }
+  .wm-newsletter-sub { font-size: 0.78rem; color: #c7cfe8; }
+  .wm-newsletter-form { display: flex; gap: 8px; }
+  .wm-newsletter-form input { padding: 10px 14px; border-radius: 6px; border: none; font-size: 0.85rem; min-width: 220px; font-family: inherit; }
+  .wm-newsletter-form button { background: var(--wm-blue); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
+  .wm-newsletter-note { font-size: 0.72rem; color: #9aa5c9; width: 100%; margin-top: 4px; }
+
+  /* Footer */
+  .wm-footer { background: var(--wm-navy); color: #b7c0e0; padding: 40px 0 20px; margin-top: 20px; }
+  .wm-footer-grid { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 24px; margin-bottom: 28px; }
+  .wm-footer-col h4 { color: #fff; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 12px 0; }
+  .wm-footer-col a { display: block; font-size: 0.82rem; margin-bottom: 8px; color: #b7c0e0; }
+  .wm-footer-col a:hover { color: #fff; }
+  .wm-footer-social { display: flex; gap: 10px; margin-top: 14px; }
+  .wm-footer-social a { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; }
+  .wm-footer-social svg { width: 13px; height: 13px; }
+  .wm-footer-contact-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; margin-bottom: 10px; color: #b7c0e0; }
+  .wm-footer-contact-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .wm-footer-bottom { border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px; font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: #8b96bd; }
+
+  /* Search-results mode (real search/category filtering, swaps out the editorial layout) */
+  .wm-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+  .wm-result-card { border: 1px solid var(--wm-border); border-radius: 8px; overflow: hidden; }
+  .wm-result-media { height: 130px; background: var(--wm-bg-alt); }
+  .wm-result-media img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-result-body { padding: 14px; }
+  .wm-result-title { font-size: 0.9rem; font-weight: 700; margin: 4px 0 6px 0; }
+  .wm-result-price { font-weight: 700; font-size: 0.85rem; }
+
+  @media (max-width: 900px) {
+    .wm-hero-grid, .wm-trend-around-grid { grid-template-columns: 1fr; }
+    .wm-picks-grid { grid-template-columns: 1fr 1fr; }
+    .wm-footer-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .wm-picks-grid { grid-template-columns: 1fr; }
+    .wm-footer-grid { grid-template-columns: 1fr; }
+    .wm-utility-bar .wm-utility-left { display: none; }
+    .wm-newsletter-bar { flex-direction: column; align-items: stretch; }
+    .wm-newsletter-form { flex-direction: column; }
+    .wm-newsletter-form input { min-width: 0; }
+    .wm-newsletter-form button { white-space: nowrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wm-utility-bar">
+  <div class="wm-wrap">
+    <div class="wm-utility-left">
+      <span id="wm-date"></span>
+      <span id="wm-location">📍 Dar es Salaam, Tanzania</span>
+      <span id="wm-weather">☀️ 28°C</span>
+    </div>
+    <div class="wm-utility-right">
+      <a href="#">About Us</a>
+      <a href="#">Advertise</a>
+      <a href="#">Careers</a>
+      <a href="#">Contact</a>
+      <div class="wm-social-icons" id="wm-utility-social"></div>
+    </div>
+  </div>
+</div>
+
+<header class="wm-main-header">
+  <div class="wm-wrap">
+    <a href="index.html" class="wm-logo">
+      <img src="images/wemix.jpeg" alt="WEMIX" onerror="this.style.display='none'; document.getElementById('wm-logo-fallback').style.display='block';">
+      <div id="wm-logo-fallback" class="wm-logo-fallback" style="display:none;">WEMIX</div>
+      <span class="wm-logo-tag">Global News Market</span>
+    </a>
+    <div class="wm-search-wrap">
+      <input type="text" id="wm-search-input" placeholder="Search news, topics, countries&hellip;">
+      <select id="wm-search-category"><option value="">All Categories</option></select>
+      <button id="wm-search-btn" aria-label="Search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+    </div>
+    <div class="wm-header-actions">
+      <span class="wm-icon-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/></svg><span><span class="wm-live-dot"></span>Live TV</span></span>
+      <span class="wm-icon-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0014 0M12 19v3"/></svg>Podcast</span>
+      <span class="wm-icon-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>Newsletter</span>
+      <div id="wm-auth-area"></div>
+    </div>
+  </div>
+</header>
+
+<nav class="wm-main-nav">
+  <div class="wm-wrap">
+    <span class="wm-nav-hamburger" id="wm-nav-hamburger" aria-label="Menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </span>
+    <span class="wm-nav-link active" data-cat="">Home</span>
+    <span class="wm-nav-link" data-cat="" data-latest="1">Latest</span>
+    <div id="wm-nav-links" style="display:contents;"></div>
+    <div class="wm-nav-more wm-hidden" id="wm-nav-more">
+      <span class="wm-nav-link" id="wm-nav-more-toggle">More ▾</span>
+      <div class="wm-nav-more-dropdown" id="wm-nav-more-dropdown"></div>
+    </div>
+  </div>
+</nav>
+
+<div class="wm-breaking-bar">
+  <div class="wm-breaking-tag">BREAKING NEWS</div>
+  <div class="wm-breaking-track-wrap">
+    <div class="wm-breaking-track" id="wm-breaking-track"></div>
+    <div class="wm-breaking-nav">
+      <button id="wm-breaking-prev" aria-label="Previous headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <button id="wm-breaking-next" aria-label="Next headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="wm-wrap wm-section" id="wm-editorial-view">
+    <div class="wm-hero-grid">
+      <div id="wm-hero-area"></div>
+      <div>
+        <div class="wm-section-head"><span class="wm-section-title">Latest News</span><span class="wm-view-all" data-latest="1">View All</span></div>
+        <div class="wm-latest-list" id="wm-latest-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wm-wrap wm-section">
+    <div class="wm-section-head"><span class="wm-section-title">Top Categories</span></div>
+    <div class="wm-cat-row" id="wm-cat-row"></div>
+  </div>
+
+  <div class="wm-wrap wm-section">
+    <div class="wm-section-head"><span class="wm-section-title">Editor's Picks</span><span class="wm-view-all" data-latest="1">View All</span></div>
+    <div class="wm-picks-grid" id="wm-picks-grid"></div>
+  </div>
+
+  <div class="wm-wrap wm-section">
+    <div class="wm-trend-around-grid">
+      <div>
+        <div class="wm-section-head"><span class="wm-section-title">Trending Now</span><span class="wm-view-all" data-latest="1">View All</span></div>
+        <div id="wm-trend-list"></div>
+      </div>
+      <div id="wm-around-wrap">
+        <div class="wm-section-head"><span class="wm-section-title">Around The World</span><span class="wm-view-all" data-latest="1">View All</span></div>
+        <div class="wm-around-grid" id="wm-around-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wm-wrap" style="padding-bottom:32px;">
+    <div class="wm-newsletter-bar">
+      <div class="wm-newsletter-left">
+        <div class="wm-newsletter-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+        </div>
+        <div>
+          <div class="wm-newsletter-title">Stay Informed. Stay Ahead.</div>
+          <div class="wm-newsletter-sub">Get the latest news and updates delivered to your inbox.</div>
+        </div>
+      </div>
+      <form class="wm-newsletter-form" id="wm-newsletter-form">
+        <input type="email" placeholder="Enter your email address" required>
+        <button type="submit">Subscribe</button>
+      </form>
+      <div class="wm-newsletter-note" id="wm-newsletter-note"></div>
+    </div>
+  </div>
+
+  <div class="wm-wrap wm-section" id="wm-results-view" style="display:none;">
+    <div class="wm-section-head">
+      <span class="wm-section-title" id="wm-results-title">Results</span>
+      <span class="wm-view-all" id="wm-back-to-home">&larr; Back to Home</span>
+    </div>
+    <div id="wm-results-status" class="text-muted" style="margin-bottom:14px;"></div>
+    <div class="wm-results-grid" id="wm-results-grid"></div>
+  </div>
+</main>
+
+<footer class="wm-footer">
+  <div class="wm-wrap">
+    <div class="wm-footer-grid">
+      <div class="wm-footer-col">
+        <div class="wm-logo-fallback" style="color:#fff; font-size:1.4rem;">WEMIX<span>.</span></div>
+        <p style="font-size:0.8rem; color:#9aa5c9; margin:8px 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
+        <div class="wm-footer-social" id="wm-footer-social"></div>
+      </div>
+      <div class="wm-footer-col">
+        <h4>Explore</h4>
+        <div id="wm-footer-categories"></div>
+      </div>
+      <div class="wm-footer-col">
+        <h4>Company</h4>
+        <a href="#">About Us</a><a href="#">Our Team</a><a href="#">Careers</a><a href="#">Advertise</a><a href="#">Press Center</a><a href="#">Contact Us</a>
+      </div>
+      <div class="wm-footer-col">
+        <h4>Resources</h4>
+        <a href="#">FAQ</a><a href="#">Privacy Policy</a><a href="#">Terms of Use</a><a href="#">Cookie Policy</a><a href="#">Sitemap</a>
+      </div>
+      <div class="wm-footer-col">
+        <h4>Get In Touch</h4>
+        <div class="wm-footer-contact-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          <a href="mailto:info@wemix.co.tz">info@wemix.co.tz</a>
+        </div>
+        <div class="wm-footer-contact-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.902.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.908.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+          <a href="tel:+255712345678">+255 712 345 678</a>
+        </div>
+        <div class="wm-footer-contact-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span>Dar es Salaam, Tanzania</span>
+        </div>
+      </div>
+    </div>
+    <div class="wm-footer-bottom">
+      <span id="wm-footer-copyright"></span>
+      <span>Powered by WEMIX Media Technology</span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/api.js"></script>
+<script>
+const CATEGORY_ICONS = {
+  politics: '<path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/>',
+  business: '<path d="M3 3v18h18M7 15l4-4 3 3 5-6"/>',
+  technology: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  world: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 6 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-6-3.5-9s1-6.5 3.5-9z"/>',
+  africa: '<path d="M12 2c3 2 5 5 5 9 0 3-1 5-2 7-1 2-2 3-3 4-1-1-2-2-3-4-1-2-2-4-2-7 0-4 2-7 5-9z"/>',
+  sports: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M4 8l16 8M4 16l16-8"/>',
+  entertainment: '<path d="M4 4h16v12H4z"/><path d="M9 20h6M8 4l2 4M18 4l-2 4"/>',
+  opinion: '<path d="M4 4h16v12H8l-4 4z"/>',
+  health: '<path d="M12 21s-7-4.5-9.5-9C1 8.5 3 5 6.5 5c2 0 3.5 1.5 4 2.5.5-1 2-2.5 4-2.5C18 5 20 8.5 18.5 12c-2.5 4.5-9.5 9-9.5 9z"/>',
+  science: '<circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="9" ry="3.5"/><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(120 12 12)"/>',
+  default: '<path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/>',
+};
+
+function catIconSvg(name) {
+  const key = Object.keys(CATEGORY_ICONS).find((k) => k !== 'default' && (name || '').toLowerCase().includes(k));
+  return `<svg class="wm-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${CATEGORY_ICONS[key || 'default']}</svg>`;
+}
+
+document.getElementById('wm-date').textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+document.getElementById('wm-footer-copyright').textContent = `© ${new Date().getFullYear()} WEMIX — Global News Market. All Rights Reserved.`;
+
+const SOCIAL_ICONS = {
+  Facebook: '<path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>',
+  X: '<path d="M4 4l16 16M20 4L4 20"/>',
+  Instagram: '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>',
+  YouTube: '<rect x="2" y="5" width="20" height="14" rx="4"/><polygon points="10,9 16,12 10,15" fill="currentColor" stroke="none"/>',
+  LinkedIn: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="8" y1="10" x2="8" y2="17"/><circle cx="8" cy="6.5" r="1" fill="currentColor" stroke="none"/><path d="M12 17v-4a2.5 2.5 0 015 0v4M12 10v7"/>',
+};
+function socialIconSvg(name) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">${SOCIAL_ICONS[name]}</svg>`;
+}
+function socialLinksHtml(names) {
+  return names.map((n) => `<a href="#" aria-label="${n}">${socialIconSvg(n)}</a>`).join('');
+}
+document.getElementById('wm-utility-social').innerHTML = socialLinksHtml(['Facebook', 'X', 'Instagram', 'YouTube']);
+document.getElementById('wm-footer-social').innerHTML = socialLinksHtml(['Facebook', 'X', 'Instagram', 'YouTube', 'LinkedIn']);
+
+function renderAuthArea() {
+  const el = document.getElementById('wm-auth-area');
+  if (Auth.isLoggedIn()) {
+    const user = Auth.getUser();
+    const initial = (user?.username || '?').charAt(0).toUpperCase();
+    const isStaff = ['moderator', 'admin', 'super_admin'].includes(user?.role);
+    el.innerHTML = `
+      <a href="${isStaff ? 'moderator.html' : 'dashboard.html'}" class="wm-user-chip">
+        <span class="wm-user-avatar">${escapeHtml(initial)}</span>
+        <span>${escapeHtml(user?.username || '')}</span>
+      </a>
+    `;
+  } else {
+    el.innerHTML = `<a href="login.html"><button class="wm-signin-btn">Sign In</button></a>`;
+  }
+}
+renderAuthArea();
+
+let ALL_CATEGORIES = [];
+
+async function loadCategories() {
+  try {
+    const data = await apiFetch('/api/news/categories/', { auth: false });
+    ALL_CATEGORIES = data.results || data;
+
+    const searchSelect = document.getElementById('wm-search-category');
+    ALL_CATEGORIES.forEach((c) => {
+      const opt = document.createElement('option');
+      opt.value = c.slug; opt.textContent = c.name;
+      searchSelect.appendChild(opt);
+    });
+
+    const navWrap = document.getElementById('wm-nav-links');
+    const INLINE_NAV_COUNT = 7;
+    ALL_CATEGORIES.slice(0, INLINE_NAV_COUNT).forEach((c) => {
+      const span = document.createElement('span');
+      span.className = 'wm-nav-link';
+      span.dataset.cat = c.slug;
+      span.textContent = c.name;
+      span.addEventListener('click', () => { setActiveNav(span); showResults({ category: c.slug, label: c.name }); });
+      navWrap.appendChild(span);
+    });
+
+    const overflowCats = ALL_CATEGORIES.slice(INLINE_NAV_COUNT);
+    if (overflowCats.length) {
+      document.getElementById('wm-nav-more').classList.remove('wm-hidden');
+      const dropdown = document.getElementById('wm-nav-more-dropdown');
+      overflowCats.forEach((c) => {
+        const span = document.createElement('span');
+        span.className = 'wm-nav-link';
+        span.dataset.cat = c.slug;
+        span.textContent = c.name;
+        span.addEventListener('click', () => {
+          setActiveNav(span);
+          dropdown.classList.remove('wm-open');
+          showResults({ category: c.slug, label: c.name });
+        });
+        dropdown.appendChild(span);
+      });
+    }
+
+    document.getElementById('wm-cat-row').innerHTML = ALL_CATEGORIES.slice(0, 10).map((c) => `
+      <div class="wm-cat-item" data-cat="${c.slug}">
+        ${catIconSvg(c.name)}
+        <span class="wm-cat-label">${escapeHtml(c.name)}</span>
+      </div>
+    `).join('');
+    document.querySelectorAll('.wm-cat-item').forEach((el) => {
+      el.addEventListener('click', () => showResults({ category: el.dataset.cat, label: el.querySelector('.wm-cat-label').textContent }));
+    });
+
+    document.getElementById('wm-footer-categories').innerHTML = ALL_CATEGORIES.slice(0, 6).map((c) =>
+      `<a href="#" data-cat="${c.slug}">${escapeHtml(c.name)}</a>`
+    ).join('') + `<a href="#" data-latest="1">Latest News</a>`;
+    document.querySelectorAll('#wm-footer-categories a').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (a.dataset.latest) showResults({ label: 'Latest News' });
+        else showResults({ category: a.dataset.cat, label: a.textContent });
+      });
+    });
+  } catch (e) { /* categories are optional UX sugar */ }
+}
+
+document.getElementById('wm-nav-more-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('wm-nav-more-dropdown').classList.toggle('wm-open');
+});
+document.addEventListener('click', () => document.getElementById('wm-nav-more-dropdown').classList.remove('wm-open'));
+
+function setActiveNav(activeEl) {
+  document.querySelectorAll('.wm-nav-link').forEach((n) => n.classList.remove('active'));
+  if (activeEl) activeEl.classList.add('active');
+}
+
+document.querySelectorAll('.wm-nav-link[data-latest], .wm-view-all[data-latest]').forEach((el) => {
+  el.addEventListener('click', () => showResults({ label: 'Latest News' }));
+});
+document.getElementById('wm-back-to-home').addEventListener('click', showHome);
+
+function showHome() {
+  document.getElementById('wm-editorial-view').style.display = '';
+  document.querySelectorAll('.wm-section').forEach((s) => { if (s.id !== 'wm-results-view') s.style.display = ''; });
+  document.getElementById('wm-results-view').style.display = 'none';
+  setActiveNav(document.querySelector('.wm-nav-link'));
+}
+
+async function showResults({ q, category, label }) {
+  document.querySelectorAll('.wm-section').forEach((s) => { if (s.id !== 'wm-results-view') s.style.display = 'none'; });
+  document.getElementById('wm-editorial-view').style.display = 'none';
+  const resultsView = document.getElementById('wm-results-view');
+  resultsView.style.display = '';
+  document.getElementById('wm-results-title').textContent = label || (q ? `Results for "${q}"` : 'Results');
+
+  const statusEl = document.getElementById('wm-results-status');
+  const grid = document.getElementById('wm-results-grid');
+  statusEl.innerHTML = '<span class="spinner"></span> Loading&hellip;';
+  grid.innerHTML = '';
+
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (category) params.set('category', category);
+
+  try {
+    const data = await apiFetch(`/api/news/listings/?${params.toString()}`, { auth: false });
+    const results = data.results || data;
+    statusEl.textContent = results.length ? `${results.length} result${results.length === 1 ? '' : 's'}` : '';
+    grid.innerHTML = results.length ? results.map(resultCardHtml).join('') :
+      `<div class="empty-state" style="grid-column:1/-1;"><h3>No stories found</h3><p>Try a different search or category.</p></div>`;
+  } catch (e) {
+    statusEl.innerHTML = `<span class="form-error">Could not load results: ${escapeHtml(formatApiError(e))}</span>`;
+  }
+}
+
+function resultCardHtml(l) {
+  return `
+    <a class="wm-result-card" href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <div class="wm-result-media">${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}</div>
+      <div class="wm-result-body">
+        <div class="wm-pick-cat">${escapeHtml((l.news_type || '').replace('_', ' '))}</div>
+        <div class="wm-result-title">${escapeHtml(l.title)}</div>
+        <div class="wm-result-price">${money(l.price, l.currency)}</div>
+      </div>
+    </a>
+  `;
+}
+
+document.getElementById('wm-search-btn').addEventListener('click', doSearch);
+document.getElementById('wm-search-input').addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
+function doSearch() {
+  const q = document.getElementById('wm-search-input').value.trim();
+  const category = document.getElementById('wm-search-category').value;
+  if (!q && !category) return;
+  showResults({ q, category, label: q ? `Results for "${q}"` : undefined });
+}
+
+document.getElementById('wm-newsletter-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  document.getElementById('wm-newsletter-note').textContent = 'Newsletter signups aren\'t available yet -- check back soon.';
+});
+
+let heroListings = [];
+let heroIndex = 0;
+
+function renderHero() {
+  const area = document.getElementById('wm-hero-area');
+  if (!heroListings.length) {
+    area.innerHTML = `<div class="wm-hero-card"><div class="wm-hero-content"><h1>No published stories yet</h1><p>Be the first to publish a verified story on WEMIX.</p></div></div>`;
+    return;
+  }
+  const l = heroListings[heroIndex];
+  const readTime = l.reading_time_minutes ? `${l.reading_time_minutes} min read` : '';
+  area.innerHTML = `
+    <div class="wm-hero-card">
+      ${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}
+      <div class="wm-hero-content">
+        <span class="wm-hero-tag">${l.featured ? 'TOP STORY' : escapeHtml((l.news_type || '').toUpperCase())}</span>
+        <h1>${escapeHtml(l.title)}</h1>
+        <p>${escapeHtml(l.description || '')}</p>
+        <div class="wm-hero-meta">By ${escapeHtml(l.seller_username || 'WEMIX')} &middot; ${timeAgo(l.created_at)}${readTime ? ' &middot; ' + readTime : ''}</div>
+        ${heroListings.length > 1 ? `<div class="wm-hero-dots">${heroListings.map((_, i) => `<span class="wm-hero-dot ${i === heroIndex ? 'active' : ''}" data-i="${i}"></span>`).join('')}</div>` : ''}
+      </div>
+      ${heroListings.length > 1 ? `
+        <button class="wm-hero-next-btn" aria-label="Next story">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      ` : ''}
+    </div>
+  `;
+  area.querySelectorAll('.wm-hero-dot').forEach((dot) => {
+    dot.addEventListener('click', () => { heroIndex = Number(dot.dataset.i); renderHero(); });
+  });
+  const nextBtn = area.querySelector('.wm-hero-next-btn');
+  if (nextBtn) nextBtn.addEventListener('click', () => { heroIndex = (heroIndex + 1) % heroListings.length; renderHero(); });
+}
+
+function latestItemHtml(l) {
+  return `
+    <a class="wm-latest-item" href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <div style="flex:1;">
+        <div><span class="wm-latest-cat">${escapeHtml((l.news_type || '').replace('_', ' '))}</span><span class="wm-latest-time">${timeAgo(l.created_at)}</span></div>
+        <div class="wm-latest-title">${escapeHtml(l.title)}</div>
+      </div>
+      <div class="wm-latest-thumb">${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}</div>
+    </a>
+  `;
+}
+
+function pickCardHtml(l) {
+  return `
+    <a href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <div class="wm-pick-card-media">${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}</div>
+      <div class="wm-pick-cat">${escapeHtml((l.news_type || '').replace('_', ' '))}</div>
+      <div class="wm-pick-title">${escapeHtml(l.title)}</div>
+      <div class="wm-pick-desc">${escapeHtml((l.description || '').slice(0, 80))}${(l.description || '').length > 80 ? '…' : ''}</div>
+      <div class="wm-pick-time">${timeAgo(l.created_at)} &middot; ${l.reading_time_minutes || 1} min read</div>
+    </a>
+  `;
+}
+
+function trendItemHtml(l, i) {
+  return `
+    <a class="wm-trend-item" href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <span class="wm-trend-num">${i + 1}</span>
+      <div class="wm-trend-thumb">${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}</div>
+      <div>
+        <div class="wm-trend-title">${escapeHtml(l.title)}</div>
+        <div class="wm-trend-time">${timeAgo(l.created_at)}</div>
+      </div>
+    </a>
+  `;
+}
+
+function aroundCardHtml(l) {
+  return `
+    <a href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <div class="wm-around-card-media">${l.cover_image ? `<img src="${l.cover_image}" alt="">` : ''}</div>
+      <div class="wm-around-loc">${escapeHtml(l.location)}</div>
+      <div class="wm-around-title">${escapeHtml(l.title)}</div>
+      <div class="wm-around-time">${timeAgo(l.created_at)}</div>
+    </a>
+  `;
+}
+
+const BREAKING_PAGE_SIZE = 3;
+let breakingHeadlines = [];
+let breakingPage = 0;
+
+function renderBreakingPage() {
+  const track = document.getElementById('wm-breaking-track');
+  const prevBtn = document.getElementById('wm-breaking-prev');
+  const nextBtn = document.getElementById('wm-breaking-next');
+  if (!breakingHeadlines.length) {
+    track.innerHTML = '<span>No published headlines yet -- be the first to list a verified story.</span>';
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+  const totalPages = Math.ceil(breakingHeadlines.length / BREAKING_PAGE_SIZE);
+  const start = breakingPage * BREAKING_PAGE_SIZE;
+  const page = breakingHeadlines.slice(start, start + BREAKING_PAGE_SIZE);
+  track.innerHTML = page.map((title) => `<span>${escapeHtml(title)}</span>`).join('');
+  prevBtn.disabled = breakingPage === 0;
+  nextBtn.disabled = breakingPage >= totalPages - 1;
+}
+
+function buildBreakingTicker(listings) {
+  breakingHeadlines = listings.slice(0, 12).map((l) => l.title);
+  breakingPage = 0;
+  renderBreakingPage();
+}
+
+document.getElementById('wm-breaking-prev').addEventListener('click', () => { breakingPage--; renderBreakingPage(); });
+document.getElementById('wm-breaking-next').addEventListener('click', () => { breakingPage++; renderBreakingPage(); });
+
+async function loadHomepageData() {
+  try {
+    const data = await apiFetch('/api/news/listings/?ordering=-created_at', { auth: false });
+    const results = data.results || data;
+
+    try { buildBreakingTicker(results); } catch (e) { console.error('ticker failed (non-fatal)', e); }
+
+    const featured = results.filter((l) => l.featured);
+    heroListings = (featured.length ? featured : results).slice(0, 5);
+    renderHero();
+
+    document.getElementById('wm-latest-list').innerHTML = results.length
+      ? results.slice(0, 5).map(latestItemHtml).join('')
+      : '<p class="text-muted">No stories yet.</p>';
+
+    const picks = (featured.length ? featured : results).slice(0, 3);
+    let picksHtml = picks.map(pickCardHtml).join('');
+    document.getElementById('wm-picks-grid').innerHTML = picksHtml + `
+      <div class="wm-live-box">
+        <div>
+          <div class="wm-live-logo">WEMIX <span>LIVE</span></div>
+          <div class="wm-newsletter-sub" style="margin-top:8px;">24/7 Breaking News and In-Depth Coverage</div>
+        </div>
+        <button class="wm-watch-btn" disabled title="Live streaming isn't available yet">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><polygon points="5,3 19,12 5,21"/></svg> Watch Live
+        </button>
+      </div>
+    `;
+    if (!picks.length) {
+      document.getElementById('wm-picks-grid').insertAdjacentHTML('afterbegin', '<p class="text-muted">No stories yet.</p>');
+    }
+  } catch (e) {
+    document.getElementById('wm-hero-area').innerHTML = `<div class="alert alert-error">Could not load stories: ${escapeHtml(formatApiError(e))}</div>`;
+  }
+
+  try {
+    const trendData = await apiFetch('/api/news/listings/?trending=1', { auth: false });
+    const trendResults = (trendData.results || trendData).slice(0, 4);
+    document.getElementById('wm-trend-list').innerHTML = trendResults.length
+      ? trendResults.map(trendItemHtml).join('')
+      : '<p class="text-muted">Nothing trending yet.</p>';
+  } catch (e) { /* trending is supplementary */ }
+
+  try {
+    const allData = await apiFetch('/api/news/listings/?ordering=-created_at', { auth: false });
+    const withLocation = (allData.results || allData).filter((l) => l.location).slice(0, 4);
+    if (withLocation.length) {
+      document.getElementById('wm-around-grid').innerHTML = withLocation.map(aroundCardHtml).join('');
+    } else {
+      document.getElementById('wm-around-wrap').classList.add('wm-hidden');
+    }
+  } catch (e) {
+    document.getElementById('wm-around-wrap').classList.add('wm-hidden');
+  }
+}
+
+loadCategories();
+loadHomepageData();
+</script>
+</body>
+</html>

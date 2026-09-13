@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Listing — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<main class="container section" id="content">
+  <p class="text-muted"><span class="spinner"></span> Loading listing&hellip;</p>
+</main>
+
+<footer>
+  <div class="container flex-between">
+    <span>&copy; 2026 Habari Platform &middot; Arusha, Tanzania</span>
+    <a href="index.html">&larr; Back to marketplace</a>
+  </div>
+</footer>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+const slug = new URLSearchParams(window.location.search).get('slug');
+const content = document.getElementById('content');
+
+function pillForVerification(status) {
+  const map = { verified: 'pill-verified', partially_verified: 'pill-verified', needs_human_review: 'pill-pending', rejected: 'pill-rejected', pending: 'pill-pending' };
+  return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace('_', ' '))}</span>`;
+}
+
+async function loadListing() {
+  if (!slug) {
+    content.innerHTML = `<div class="alert alert-error">No listing specified.</div>`;
+    return;
+  }
+  try {
+    const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`, { auth: Auth.isLoggedIn() });
+    renderListing(listing);
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">Could not load this listing: ${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+function renderListing(listing) {
+  document.title = `${listing.title} — Habari Platform`;
+  let metaTag = document.querySelector('meta[name="description"]');
+  if (!metaTag) {
+    metaTag = document.createElement('meta');
+    metaTag.name = 'description';
+    document.head.appendChild(metaTag);
+  }
+  metaTag.content = listing.meta_description || listing.description || '';
+
+  const cover = (listing.media || []).find((m) => m.is_cover) || (listing.media || [])[0];
+  const mediaHtml = cover
+    ? `<div class="detail-media"><img src="${cover.preview_file || cover.file}" alt=""></div>`
+    : '';
+
+  const bodyHtml = listing.body_locked
+    ? `<div class="paywall">
+         <h3>This story is locked</h3>
+         <p>Purchase this listing to read the full report.</p>
+       </div>`
+    : `<div class="card" style="padding:22px;"><p style="white-space:pre-wrap;">${escapeHtml(listing.body)}</p></div>`;
+
+  const user = Auth.getUser();
+  const isOwner = user && listing.seller === user.id;
+  const ratingHtml = listing.review_count > 0
+    ? `<span class="rating-summary">${starString(listing.average_rating)} <strong>${listing.average_rating}</strong> <span class="text-muted">(${listing.review_count} review${listing.review_count === 1 ? '' : 's'})</span></span>`
+    : `<span class="text-muted">No reviews yet</span>`;
+
+  const bylineLine = listing.byline
+    ? `${escapeHtml(listing.byline)}${listing.dateline ? ' &mdash; ' + escapeHtml(listing.dateline) : ''}`
+    : `By ${escapeHtml(listing.seller_username)}${listing.dateline ? ' &mdash; ' + escapeHtml(listing.dateline) : ''}`;
+  const readingTimeLine = listing.reading_time_minutes ? ` &middot; ${listing.reading_time_minutes} min read` : '';
+
+  content.innerHTML = `
+    <div class="detail-grid">
+      <div>
+        ${mediaHtml}
+        <div class="listing-eyebrow">${escapeHtml((listing.news_type || '').replace('_', ' '))} &middot; ${pillForVerification(listing.verification_status)}${listing.featured ? ' &middot; <span class="pill pill-verified">Featured</span>' : ''}</div>
+        <h1>${escapeHtml(listing.title)}</h1>
+        <p class="text-muted" style="display:flex; align-items:center; gap:8px;">
+          ${listing.seller_avatar ? `<img src="${listing.seller_avatar}" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : ''}
+          <span>${bylineLine}${readingTimeLine} &middot; ${escapeHtml(listing.location || '')}</span>
+          ${listing.seller_verified_badge ? `<span title="Verified publisher" style="color:var(--color-gold-dark); font-weight:700;">&#10003;</span>` : ''}
+        </p>
+        ${listing.seller_bio ? `<p class="text-muted" style="font-size:0.85rem; margin:2px 0 6px 0;">${escapeHtml(listing.seller_bio)}</p>` : ''}
+        ${(listing.seller_website_url || listing.seller_twitter_url || listing.seller_facebook_url) ? `
+          <p style="margin:2px 0 6px 0; font-size:0.8rem;">
+            ${listing.seller_website_url ? `<a href="${escapeHtml(listing.seller_website_url)}" target="_blank" rel="noopener" style="margin-right:10px;">Website</a>` : ''}
+            ${listing.seller_twitter_url ? `<a href="${escapeHtml(listing.seller_twitter_url)}" target="_blank" rel="noopener" style="margin-right:10px;">Twitter/X</a>` : ''}
+            ${listing.seller_facebook_url ? `<a href="${escapeHtml(listing.seller_facebook_url)}" target="_blank" rel="noopener">Facebook</a>` : ''}
+          </p>
+        ` : ''}
+        <p style="margin:2px 0 10px 0;">
+          <span class="text-muted" style="font-size:0.85rem;">${listing.seller_follower_count != null ? listing.seller_follower_count : 0} follower${listing.seller_follower_count === 1 ? '' : 's'}</span>
+          ${(user && !isOwner) ? `<button class="btn btn-outline btn-sm" id="follow-seller-btn" data-slug="${listing.slug}" style="margin-left:10px; padding:3px 12px; font-size:0.8rem;">${listing.is_following_seller ? 'Following' : 'Follow'}</button>` : ''}
+        </p>
+        <p style="margin:6px 0 14px 0;">${ratingHtml}</p>
+        <p>${escapeHtml(listing.description)}</p>
+        ${bodyHtml}
+        <div id="reviews-section" style="margin-top:28px;"></div>
+      </div>
+      <div>
+        <div class="card buy-box">
+          <div class="buy-price">${money(listing.price, listing.currency)}</div>
+          <p class="text-muted" style="margin-top:0;">One-time purchase, instant access.</p>
+          <div id="buy-area"></div>
+          ${user ? `<button class="btn btn-outline btn-sm btn-block" id="bookmark-btn" data-slug="${listing.slug}" style="margin-top:10px;">${listing.is_bookmarked ? '&#9733; Bookmarked' : '&#9734; Save for later'}</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderBuyArea(listing, isOwner);
+  renderReviewsSection(listing);
+
+  const bookmarkBtn = document.getElementById('bookmark-btn');
+  if (bookmarkBtn) {
+    bookmarkBtn.addEventListener('click', async () => {
+      bookmarkBtn.disabled = true;
+      try {
+        const result = await apiFetch(`/api/news/listings/${encodeURIComponent(listing.slug)}/bookmark/`, { method: 'POST' });
+        bookmarkBtn.innerHTML = result.is_bookmarked ? '&#9733; Bookmarked' : '&#9734; Save for later';
+      } catch (err) {
+        alert(formatApiError(err));
+      } finally {
+        bookmarkBtn.disabled = false;
+      }
+    });
+  }
+
+  const followBtn = document.getElementById('follow-seller-btn');
+  if (followBtn) {
+    followBtn.addEventListener('click', async () => {
+      followBtn.disabled = true;
+      try {
+        const result = await apiFetch(`/api/news/listings/${encodeURIComponent(listing.slug)}/follow-seller/`, { method: 'POST' });
+        followBtn.textContent = result.is_following_seller ? 'Following' : 'Follow';
+        const countEl = followBtn.previousElementSibling;
+        if (countEl) {
+          const current = listing.seller_follower_count || 0;
+          const updated = result.is_following_seller ? current + 1 : Math.max(0, current - 1);
+          listing.seller_follower_count = updated;
+          countEl.textContent = `${updated} follower${updated === 1 ? '' : 's'}`;
+        }
+      } catch (err) {
+        alert(formatApiError(err));
+      } finally {
+        followBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function starString(rating) {
+  const rounded = Math.round(rating);
+  return '&#9733;'.repeat(rounded) + '&#9734;'.repeat(5 - rounded);
+}
+
+async function renderReviewsSection(listing) {
+  const section = document.getElementById('reviews-section');
+  section.innerHTML = `<h3>Reviews</h3><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+
+  let reviews = [];
+  try {
+    reviews = await apiFetch(`/api/news/listings/${encodeURIComponent(listing.slug)}/reviews/`, { auth: false });
+  } catch (err) {
+    section.innerHTML = `<h3>Reviews</h3><div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    return;
+  }
+
+  const reviewsHtml = reviews.length
+    ? reviews.map((r) => `
+        <div class="card" style="padding:14px 18px; margin-bottom:10px;">
+          <div class="flex-between">
+            <strong>${escapeHtml(r.reviewer_username)}</strong>
+            <span>${starString(r.rating)}</span>
+          </div>
+          ${r.comment ? `<p style="margin:6px 0 0 0; font-size:0.9rem;">${escapeHtml(r.comment)}</p>` : ''}
+          <p class="text-muted" style="margin:6px 0 0 0; font-size:0.78rem;">${timeAgo(r.created_at)}</p>
+        </div>
+      `).join('')
+    : `<p class="text-muted">No reviews yet -- be the first to review this after purchasing.</p>`;
+
+  section.innerHTML = `<h3>Reviews</h3><div id="review-form-area"></div>${reviewsHtml}`;
+
+  await renderReviewForm(listing);
+}
+
+async function renderReviewForm(listing) {
+  const el = document.getElementById('review-form-area');
+  if (!Auth.isLoggedIn()) return; // anonymous visitors just see the list
+
+  let myPaidOrder = null;
+  try {
+    const orders = await apiFetch('/api/payments/orders/mine/');
+    const results = orders.results || orders;
+    myPaidOrder = results.find((o) => o.listing === listing.id && o.status === 'paid' && !o.has_review);
+  } catch (err) {
+    return; // silently skip the form if we can't confirm purchase status
+  }
+
+  if (!myPaidOrder) return; // haven't purchased, or already reviewed (order has a review already)
+
+  el.innerHTML = `
+    <div class="card" style="padding:18px; margin-bottom:14px;">
+      <h4 style="margin-top:0;">Leave a review</h4>
+      <div id="review-alert"></div>
+      <form id="review-form">
+        <div class="form-group">
+          <label for="review-rating">Rating</label>
+          <select id="review-rating">
+            <option value="5">5 - Excellent</option>
+            <option value="4">4 - Good</option>
+            <option value="3">3 - Average</option>
+            <option value="2">2 - Below average</option>
+            <option value="1">1 - Poor</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="review-comment">Comment (optional)</label>
+          <textarea id="review-comment" placeholder="What did you think of this story?"></textarea>
+        </div>
+        <button type="submit" class="btn btn-sm" id="review-submit-btn">Submit review</button>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('review-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertBox = document.getElementById('review-alert');
+    const btn = document.getElementById('review-submit-btn');
+    alertBox.innerHTML = '';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Submitting&hellip;';
+    try {
+      await apiFetch(`/api/news/listings/${encodeURIComponent(listing.slug)}/reviews/`, {
+        method: 'POST',
+        body: { order_id: myPaidOrder.id, rating: document.getElementById('review-rating').value, comment: document.getElementById('review-comment').value },
+      });
+      loadListing(); // full reload -- picks up updated average_rating + new review in the list
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Submit review';
+    }
+  });
+}
+
+function renderBuyArea(listing, isOwner) {
+  const el = document.getElementById('buy-area');
+
+  if (isOwner) {
+    el.innerHTML = `<a href="dashboard.html" class="btn btn-outline btn-block">Manage in dashboard</a>`;
+    return;
+  }
+  if (!listing.body_locked) {
+    el.innerHTML = `<div class="alert alert-success">You already have access to this story.</div>`;
+    return;
+  }
+  if (!Auth.isLoggedIn()) {
+    el.innerHTML = `<a href="login.html" class="btn btn-block">Log in to purchase</a>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div id="buy-alert"></div>
+    <div class="form-group">
+      <label for="payment-provider">Payment option</label>
+      <select id="payment-provider">
+        <option value="selcom">Tanzania -- Mobile Money / Card / Bank</option>
+        <option value="nala">International -- Card / Bank transfer</option>
+      </select>
+    </div>
+    <div id="selcom-fields">
+      <div class="form-group">
+        <label for="channel">Payment method</label>
+        <select id="channel">
+          <option value="mobile_money">Mobile Money</option>
+          <option value="card">Card</option>
+          <option value="bank">Bank</option>
+        </select>
+      </div>
+      <div class="form-group" id="msisdn-group">
+        <label for="msisdn">Phone number</label>
+        <input type="text" id="msisdn" placeholder="+255712345678">
+      </div>
+    </div>
+    <div class="form-group hidden" id="nala-fields">
+      <label for="nala-currency">Currency</label>
+      <select id="nala-currency">
+        <option value="USD">USD</option>
+        <option value="GBP">GBP</option>
+        <option value="EUR">EUR</option>
+      </select>
+      <p class="text-muted" style="font-size:0.78rem; margin-top:4px;">International payments are processed via Nala/Rafiki.</p>
+    </div>
+    <button class="btn btn-block" id="buy-btn">Buy &amp; unlock</button>
+  `;
+
+  document.getElementById('channel').addEventListener('change', (e) => {
+    document.getElementById('msisdn-group').classList.toggle('hidden', e.target.value !== 'mobile_money');
+  });
+
+  document.getElementById('payment-provider').addEventListener('change', (e) => {
+    const isNala = e.target.value === 'nala';
+    document.getElementById('selcom-fields').classList.toggle('hidden', isNala);
+    document.getElementById('nala-fields').classList.toggle('hidden', !isNala);
+  });
+
+  document.getElementById('buy-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('buy-btn');
+    const alertBox = document.getElementById('buy-alert');
+    alertBox.innerHTML = '';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Starting checkout&hellip;';
+
+    const provider = document.getElementById('payment-provider').value;
+    const body = provider === 'nala'
+      ? { listing_slug: listing.slug, payment_provider: 'nala', currency: document.getElementById('nala-currency').value }
+      : { listing_slug: listing.slug, payment_provider: 'selcom', channel: document.getElementById('channel').value, msisdn: document.getElementById('msisdn').value };
+
+    try {
+      const data = await apiFetch('/api/payments/orders/', { method: 'POST', body });
+      window.location.href = `checkout.html?order=${encodeURIComponent(data.order.id)}`;
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Buy & unlock';
+    }
+  });
+}
+
+loadListing();
+</script>
+</body>
+</html>

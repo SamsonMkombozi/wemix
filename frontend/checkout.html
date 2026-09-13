@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Checkout — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<div class="auth-shell">
+  <div class="card form-card" style="text-align:center;">
+    <div id="content">
+      <span class="spinner" style="width:28px;height:28px;"></span>
+      <h2>Waiting for payment confirmation&hellip;</h2>
+      <p class="text-muted">Complete the payment on your phone (mobile money PIN prompt) or the payment gateway page. This will update automatically once confirmed.</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+const orderId = new URLSearchParams(window.location.search).get('order');
+const content = document.getElementById('content');
+let pollCount = 0;
+let pollTimer = null;
+
+function showResult(status) {
+  clearInterval(pollTimer);
+  if (status === 'paid') {
+    content.innerHTML = `
+      <h2 style="color:var(--color-success);">Payment confirmed</h2>
+      <p class="text-muted">The story is now unlocked.</p>
+      <a href="dashboard.html" class="btn" style="margin-top:8px;">Go to dashboard</a>
+    `;
+  } else if (status === 'failed') {
+    content.innerHTML = `
+      <h2 style="color:var(--color-danger);">Payment failed</h2>
+      <p class="text-muted">The payment did not complete. You can try again from the listing page.</p>
+      <a href="index.html" class="btn btn-outline" style="margin-top:8px;">Back to marketplace</a>
+    `;
+  } else {
+    content.innerHTML = `
+      <h2>Still waiting&hellip;</h2>
+      <p class="text-muted">This is taking longer than expected. Check your order status in the dashboard, or contact support if the payment already went through on your phone.</p>
+      <a href="dashboard.html" class="btn btn-outline" style="margin-top:8px;">Go to dashboard</a>
+    `;
+  }
+}
+
+async function poll() {
+  if (!orderId) {
+    content.innerHTML = `<div class="alert alert-error">No order specified.</div>`;
+    return;
+  }
+  pollCount += 1;
+  try {
+    const data = await apiFetch(`/api/payments/orders/${encodeURIComponent(orderId)}/status/`);
+    if (data.status === 'paid' || data.status === 'failed') {
+      showResult(data.status);
+    } else if (pollCount > 40) {
+      showResult('timeout');
+    }
+  } catch (err) {
+    if (err.status === 401) {
+      // Session expired/invalid while waiting -- don't spin forever with
+      // no explanation. The payment may still have gone through; send
+      // them to log back in and check their dashboard rather than
+      // leaving them stuck on an endless "waiting" spinner.
+      clearInterval(pollTimer);
+      content.innerHTML = `
+        <h2 style="color:var(--color-danger);">Session expired</h2>
+        <p class="text-muted">We couldn't confirm your payment status because you're no longer logged in. If you completed the payment, it should still go through -- log back in and check your dashboard.</p>
+        <a href="login.html" class="btn" style="margin-top:8px;">Log in</a>
+      `;
+      return;
+    }
+    // keep polling silently on other, transient errors
+  }
+}
+
+pollTimer = setInterval(poll, 3000);
+poll();
+</script>
+</body>
+</html>

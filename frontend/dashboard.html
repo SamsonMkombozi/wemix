@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<main class="container section" id="gate">
+  <p class="text-muted"><span class="spinner"></span> Loading dashboard&hellip;</p>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+if (!Auth.isLoggedIn()) {
+  window.location.href = 'login.html';
+}
+const _dashUser = Auth.getUser();
+if (['moderator', 'admin', 'super_admin'].includes(_dashUser?.role)) {
+  window.location.href = 'moderator.html';
+}
+
+const gate = document.getElementById('gate');
+
+gate.innerHTML = `
+  <div class="dash-grid">
+    <aside class="dash-sidebar">
+      <div class="card" id="me-card">
+        <span class="spinner"></span>
+      </div>
+      <div class="card" id="wallet-card">
+        <span class="spinner"></span>
+      </div>
+    </aside>
+    <section>
+      <div class="dash-tabs">
+        <div class="dash-tab active" data-tab="listings">My Listings</div>
+        <div class="dash-tab" data-tab="create">Sell News</div>
+        <div class="dash-tab" data-tab="verification">Verification</div>
+        <div class="dash-tab" data-tab="purchases">My Purchases</div>
+        <div class="dash-tab" data-tab="bookmarks">Bookmarks</div>
+        <div class="dash-tab" data-tab="following">Following</div>
+        <div class="dash-tab" data-tab="withdrawals">Withdrawals</div>
+      </div>
+      <div id="tab-content"></div>
+    </section>
+  </div>
+`;
+
+document.querySelectorAll('.dash-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.dash-tab').forEach((t) => t.classList.remove('active'));
+    tab.classList.add('active');
+    renderTab(tab.dataset.tab);
+  });
+});
+
+function pillForStatus(status, map) {
+  return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace('_', ' '))}</span>`;
+}
+
+async function loadMe() {
+  const el = document.getElementById('me-card');
+  try {
+    const me = await apiFetch('/api/accounts/me/');
+    Auth.setSession({ user: me });
+    const kycMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' };
+    el.innerHTML = `
+      <h3 style="margin-bottom:4px;">${escapeHtml(me.username)}</h3>
+      <p class="text-muted" style="margin:0 0 12px 0; font-size:0.85rem;">${escapeHtml(me.email)}</p>
+      <p style="font-size:0.85rem;">Role: <strong>${escapeHtml((me.role || '').replace('_', ' '))}</strong></p>
+      <p style="font-size:0.85rem;">ID verification: ${pillForStatus(me.id_verification_status, kycMap)}</p>
+      ${me.id_verification_status !== 'verified' ? `<p class="form-hint">Submit ID verification (via the API's /api/accounts/kyc/ endpoint) before you can sell.</p>` : ''}
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function loadWallet() {
+  const el = document.getElementById('wallet-card');
+  try {
+    const data = await apiFetch('/api/wallet/me/');
+    el.innerHTML = `
+      <p class="text-muted" style="margin:0 0 4px 0; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em;">Wallet balance</p>
+      <div class="wallet-balance">${Number(data.wallet.balance).toLocaleString()} <span class="wallet-currency">${escapeHtml(data.wallet.currency)}</span></div>
+      <p class="form-hint">${data.recent_transactions.length} recent transaction(s)</p>
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderTab(tab) {
+  const content = document.getElementById('tab-content');
+  content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+
+  if (tab === 'listings') return renderListingsTab(content);
+  if (tab === 'create') return renderCreateTab(content);
+  if (tab === 'verification') return renderVerificationTab(content);
+  if (tab === 'purchases') return renderPurchasesTab(content);
+  if (tab === 'bookmarks') return renderBookmarksTab(content);
+  if (tab === 'following') return renderFollowingTab(content);
+  if (tab === 'withdrawals') return renderWithdrawalsTab(content);
+}
+
+async function renderListingsTab(content) {
+  const statusMap = { published: 'pill-verified', draft: 'pill-draft', submitted: 'pill-pending', suspended: 'pill-rejected', removed: 'pill-rejected', sold_out: 'pill-verified' };
+  try {
+    const data = await apiFetch('/api/news/listings/?mine=1');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No listings yet</h3><p>Use the "Sell News" tab to publish your first verified story.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((l) => `
+      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+        <div class="flex-between">
+          <div>
+            <h3 style="margin:0 0 6px 0;">${escapeHtml(l.title)}</h3>
+            <p class="text-muted" style="margin:0; font-size:0.85rem;">${money(l.price, l.currency)} &middot; ${escapeHtml(l.purchase_count)} sold &middot; ${escapeHtml(l.view_count)} views &middot; ${l.cover_image ? '1+' : '0'} media</p>
+          </div>
+          <div style="text-align:right;">
+            ${pillForStatus(l.status, statusMap)}
+            <div style="margin-top:8px;">
+              ${l.status === 'draft' ? `<button class="btn btn-sm submit-btn" data-slug="${l.slug}">Submit for review</button>` : ''}
+              <button class="btn btn-ghost btn-sm media-toggle-btn" data-slug="${l.slug}">Add media</button>
+              <a href="listing.html?slug=${encodeURIComponent(l.slug)}" class="btn btn-ghost btn-sm">View</a>
+            </div>
+          </div>
+        </div>
+        <div class="media-upload-area hidden" id="media-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+          <div id="media-alert-${l.slug}"></div>
+          <form class="media-form" data-slug="${l.slug}">
+            <div class="field-row">
+              <div class="form-group">
+                <label for="media-type-${l.slug}">Media type</label>
+                <select id="media-type-${l.slug}">
+                  <option value="image">Image</option>
+                  <option value="video">Video</option>
+                  <option value="document">Document</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="media-file-${l.slug}">File</label>
+                <input type="file" id="media-file-${l.slug}" accept="image/*,video/*" required>
+              </div>
+            </div>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+              <input type="checkbox" id="media-cover-${l.slug}" checked style="width:auto;">
+              Use as cover image
+            </label>
+            <button type="submit" class="btn btn-sm">Upload</button>
+          </form>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.submit-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>';
+        try {
+          await apiFetch(`/api/news/listings/${encodeURIComponent(btn.dataset.slug)}/submit/`, { method: 'POST' });
+          renderListingsTab(content);
+        } catch (err) {
+          alert(formatApiError(err));
+          btn.disabled = false;
+          btn.textContent = 'Submit for review';
+        }
+      });
+    });
+
+    content.querySelectorAll('.media-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.getElementById(`media-area-${btn.dataset.slug}`).classList.toggle('hidden');
+      });
+    });
+
+    content.querySelectorAll('.media-form').forEach((form) => {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const slug = form.dataset.slug;
+        const alertBox = document.getElementById(`media-alert-${slug}`);
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const fileInput = document.getElementById(`media-file-${slug}`);
+        alertBox.innerHTML = '';
+
+        if (!fileInput.files.length) {
+          alertBox.innerHTML = `<div class="alert alert-error">Choose a file first.</div>`;
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('media_type', document.getElementById(`media-type-${slug}`).value);
+        formData.append('file', fileInput.files[0]);
+        formData.append('is_cover', document.getElementById(`media-cover-${slug}`).checked);
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner"></span> Uploading&hellip;';
+        try {
+          await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/media/`, {
+            method: 'POST', body: formData, isForm: true,
+          });
+          alertBox.innerHTML = `<div class="alert alert-success">Media uploaded.</div>`;
+          setTimeout(() => renderListingsTab(content), 900);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Upload';
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderVerificationTab(content) {
+  content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  const kycMap = { verified: 'pill-verified', pending: 'pill-pending', awaiting_review: 'pill-pending', rejected: 'pill-rejected', ocr_processing: 'pill-pending' };
+
+  try {
+    const [me, submissions] = await Promise.all([
+      apiFetch('/api/accounts/me/'),
+      apiFetch('/api/accounts/kyc/'),
+    ]);
+    const history = submissions.results || submissions;
+
+    content.innerHTML = `
+      <div class="card" style="padding:22px; margin-bottom:20px;">
+        <div class="flex-between" style="margin-bottom:4px;">
+          <h3 style="margin:0;">Identity verification</h3>
+          ${pillForStatus(me.id_verification_status, { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' })}
+        </div>
+        <p class="text-muted" style="margin-top:0;">Verification is required before you can sell news on the platform.</p>
+
+        ${me.id_verification_status === 'verified' ? `
+          <div class="alert alert-success">Your identity is verified. You're all set to sell.</div>
+        ` : `
+          <div id="kyc-alert"></div>
+          <form id="kyc-form">
+            <div class="form-group">
+              <label for="kyc-id-type">ID type</label>
+              <select id="kyc-id-type">
+                <option value="nida">NIDA National ID</option>
+                <option value="passport">Passport</option>
+                <option value="drivers_license">Driver's License</option>
+                <option value="voter_id">Voter ID</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <div class="form-group">
+                <label for="kyc-front">ID front photo</label>
+                <input type="file" id="kyc-front" accept="image/*" required>
+              </div>
+              <div class="form-group">
+                <label for="kyc-back">ID back photo (optional)</label>
+                <input type="file" id="kyc-back" accept="image/*">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="kyc-selfie">Selfie (holding your ID, if possible)</label>
+              <input type="file" id="kyc-selfie" accept="image/*" required>
+            </div>
+            <button type="submit" class="btn" id="kyc-submit-btn">Submit for verification</button>
+          </form>
+        `}
+      </div>
+
+      <h4 style="margin-bottom:10px;">Submission history</h4>
+      ${history.length ? history.map((h) => `
+        <div class="table-row">
+          <span>${escapeHtml((h.id_type || '').toUpperCase())}</span>
+          <span>${pillForStatus(h.status, kycMap)}</span>
+          <span class="text-muted">${escapeHtml(h.rejection_reason || '')}</span>
+          <span class="text-muted">${timeAgo(h.created_at)}</span>
+        </div>
+      `).join('') : '<p class="text-muted">No submissions yet.</p>'}
+
+      <div class="card" style="padding:22px; margin-top:24px; border-color:#f3cfcc;">
+        <h4 style="margin-top:0; color:var(--color-danger);">Danger zone</h4>
+        <p class="text-muted" style="font-size:0.85rem;">Deactivating your account blocks future login and unpublishes your live listings. Buyers who already purchased from you keep access. This cannot be undone by you -- contact support to reactivate.</p>
+        <div id="deactivate-alert"></div>
+        <button class="btn btn-outline btn-sm" id="deactivate-toggle-btn" style="border-color:var(--color-danger); color:var(--color-danger);">Deactivate my account</button>
+        <div id="deactivate-form-area" class="hidden" style="margin-top:14px;">
+          <div class="form-group">
+            <label for="deactivate-password">Confirm your password</label>
+            <input type="password" id="deactivate-password">
+          </div>
+          <button class="btn btn-sm" id="deactivate-confirm-btn" style="background:var(--color-danger); border-color:var(--color-danger);">Yes, deactivate permanently</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('deactivate-toggle-btn').addEventListener('click', () => {
+      document.getElementById('deactivate-form-area').classList.toggle('hidden');
+    });
+    document.getElementById('deactivate-confirm-btn').addEventListener('click', async () => {
+      const alertBox = document.getElementById('deactivate-alert');
+      const password = document.getElementById('deactivate-password').value;
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch('/api/accounts/me/deactivate/', { method: 'POST', body: { password } });
+        Auth.logout();
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    });
+
+    const form = document.getElementById('kyc-form');
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertBox = document.getElementById('kyc-alert');
+        const btn = document.getElementById('kyc-submit-btn');
+        alertBox.innerHTML = '';
+
+        const front = document.getElementById('kyc-front').files[0];
+        const back = document.getElementById('kyc-back').files[0];
+        const selfie = document.getElementById('kyc-selfie').files[0];
+        if (!front || !selfie) {
+          alertBox.innerHTML = `<div class="alert alert-error">Front ID photo and selfie are both required.</div>`;
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('id_type', document.getElementById('kyc-id-type').value);
+        formData.append('front_image', front);
+        if (back) formData.append('back_image', back);
+        formData.append('selfie_image', selfie);
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Submitting&hellip;';
+        try {
+          await apiFetch('/api/accounts/kyc/', { method: 'POST', body: formData, isForm: true });
+          alertBox.innerHTML = `<div class="alert alert-success">Submitted. A moderator will review it shortly.</div>`;
+          setTimeout(() => renderVerificationTab(content), 1200);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Submit for verification';
+        }
+      });
+    }
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderCreateTab(content) {
+  let categories = [];
+  try {
+    const data = await apiFetch('/api/news/categories/', { auth: false });
+    categories = data.results || data;
+  } catch (e) { /* fall through with empty list */ }
+
+  content.innerHTML = `
+    <div class="card" style="padding:24px;">
+      <div id="create-alert"></div>
+      <form id="create-form">
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" required>
+        </div>
+        <div class="form-group">
+          <label for="description">Short description (public)</label>
+          <textarea id="description" required style="min-height:60px;"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="meta_description">SEO description <span class="text-muted">(optional -- auto-filled from the description above if left blank)</span></label>
+          <textarea id="meta_description" style="min-height:50px;" maxlength="300" placeholder="A concise summary for search engines, under 300 characters."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="body">Full story (unlocked only after purchase)</label>
+          <textarea id="body" required style="min-height:140px;"></textarea>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="byline">Byline <span class="text-muted">(optional -- if the credited author differs from your account)</span></label>
+            <input type="text" id="byline" placeholder="By Jane Reporter">
+          </div>
+          <div class="form-group">
+            <label for="dateline">Dateline <span class="text-muted">(optional)</span></label>
+            <input type="text" id="dateline" placeholder="DODOMA, Aug 14">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="news_type">Type</label>
+            <select id="news_type">
+              <option value="text">Text News</option>
+              <option value="breaking">Breaking News</option>
+              <option value="investigative">Investigative Report</option>
+              <option value="political">Political</option>
+              <option value="business">Business</option>
+              <option value="sports">Sports</option>
+              <option value="image">Image News</option>
+              <option value="video">Video News</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="category">Category</label>
+            <select id="category">
+              ${categories.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="location">Location</label>
+            <input type="text" id="location" placeholder="e.g. Dodoma">
+          </div>
+          <div class="form-group">
+            <label for="price">Price (TZS)</label>
+            <input type="number" id="price" min="0" step="1" required>
+          </div>
+        </div>
+        <button type="submit" class="btn" id="create-btn">Save as draft</button>
+        <p class="form-hint">After saving, submit it for AI/moderation review from the "My Listings" tab.</p>
+      </form>
+    </div>
+  `;
+
+  if (!categories.length) {
+    document.getElementById('create-alert').innerHTML = `<div class="alert alert-info">No categories exist yet. An admin needs to create one (via /admin/) before you can publish.</div>`;
+  }
+
+  document.getElementById('create-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertBox = document.getElementById('create-alert');
+    const btn = document.getElementById('create-btn');
+    alertBox.innerHTML = '';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving&hellip;';
+
+    try {
+      await apiFetch('/api/news/listings/', {
+        method: 'POST',
+        body: {
+          title: document.getElementById('title').value,
+          description: document.getElementById('description').value,
+          meta_description: document.getElementById('meta_description').value,
+          body: document.getElementById('body').value,
+          byline: document.getElementById('byline').value,
+          dateline: document.getElementById('dateline').value,
+          news_type: document.getElementById('news_type').value,
+          category: document.getElementById('category').value,
+          location: document.getElementById('location').value,
+          price: document.getElementById('price').value,
+        },
+      });
+      alertBox.innerHTML = `<div class="alert alert-success">Draft created. Switch to "My Listings" to submit it for review.</div>`;
+      document.getElementById('create-form').reset();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save as draft';
+    }
+  });
+}
+
+async function renderFollowingTab(content) {
+  try {
+    const data = await apiFetch('/api/news/following/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>Not following anyone yet</h3><p>Follow a journalist or media house from any of their listing pages to see their new stories here first.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((f) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between">
+          <div>
+            <strong>${escapeHtml(f.username)}</strong>
+            ${f.organization_name ? `<span class="text-muted"> &middot; ${escapeHtml(f.organization_name)}</span>` : ''}
+            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.85rem;">${f.published_listing_count} published listing${f.published_listing_count === 1 ? '' : 's'} &middot; followed ${timeAgo(f.followed_at)}</p>
+          </div>
+          <button class="btn btn-outline btn-sm following-unfollow-btn" data-followed-id="${f.followed_id}">Unfollow</button>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.following-unfollow-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await apiFetch(`/api/news/users/${encodeURIComponent(btn.dataset.followedId)}/follow/`, { method: 'POST' });
+          renderFollowingTab(content);
+        } catch (err) {
+          alert(formatApiError(err));
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderBookmarksTab(content) {
+  try {
+    const data = await apiFetch('/api/news/bookmarks/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No bookmarks yet</h3><p>Save listings for later by clicking "Save for later" on any listing page.</p></div>`;
+      return;
+    }
+    const statusMap = { published: 'pill-verified', draft: 'pill-draft', submitted: 'pill-pending' };
+    content.innerHTML = results.map((b) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between">
+          <div>
+            <a href="listing.html?slug=${encodeURIComponent(b.listing.slug)}" style="font-weight:600;">${escapeHtml(b.listing.title)}</a>
+            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.85rem;">${escapeHtml(b.listing.seller_username || '')} &middot; ${money(b.listing.price, b.listing.currency)} &middot; saved ${timeAgo(b.bookmarked_at)}</p>
+          </div>
+          <div style="text-align:right;">
+            ${pillForStatus(b.listing.status, statusMap)}
+            <div style="margin-top:8px;">
+              <button class="btn btn-outline btn-sm bookmark-remove-btn" data-slug="${b.listing.slug}">Remove</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.bookmark-remove-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await apiFetch(`/api/news/listings/${encodeURIComponent(btn.dataset.slug)}/bookmark/`, { method: 'POST' });
+          renderBookmarksTab(content);
+        } catch (err) {
+          alert(formatApiError(err));
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderPurchasesTab(content) {
+  try {
+    const data = await apiFetch('/api/payments/orders/mine/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No purchases yet</h3><p>Browse the marketplace to buy your first verified story.</p></div>`;
+      return;
+    }
+    const statusMap = { paid: 'pill-verified', pending_payment: 'pill-pending', failed: 'pill-rejected', cancelled: 'pill-rejected', refunded: 'pill-draft' };
+    content.innerHTML = results.map((o) => `
+      <div class="table-row">
+        <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}">${escapeHtml(o.listing_title)}</a>
+        <span>${money(o.amount, o.currency)}</span>
+        <span>${pillForStatus(o.status, statusMap)}</span>
+        <span class="text-muted">${timeAgo(o.created_at)}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderWithdrawalsTab(content) {
+  try {
+    const [walletData, withdrawals, payoutAccountsResp] = await Promise.all([
+      apiFetch('/api/wallet/me/'),
+      apiFetch('/api/wallet/withdrawals/'),
+      apiFetch('/api/wallet/payout-accounts/'),
+    ]);
+    const results = withdrawals.results || withdrawals;
+    const payoutAccounts = payoutAccountsResp.results || payoutAccountsResp;
+    const verifiedAccounts = payoutAccounts.filter((a) => a.status === 'verified');
+    const statusMap = { completed: 'pill-verified', requested: 'pill-pending', approved: 'pill-pending', processing: 'pill-pending', rejected: 'pill-rejected', failed: 'pill-rejected' };
+    const payoutStatusMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected' };
+
+    content.innerHTML = `
+      <div class="card" style="padding:22px; margin-bottom:20px;">
+        <h3 style="margin-top:0;">Payout accounts</h3>
+        <p class="text-muted" style="margin-top:-8px;">Add a mobile money or bank account. A moderator verifies it once, then you can withdraw to it anytime.</p>
+        <div id="payout-alert"></div>
+        ${payoutAccounts.length ? payoutAccounts.map((a) => `
+          <div class="table-row">
+            <span>${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}${a.is_default ? ' <span class="pill pill-verified">default</span>' : ''}</span>
+            <span>${pillForStatus(a.status, payoutStatusMap)}</span>
+            <span class="text-muted">${escapeHtml(a.rejection_reason || '')}</span>
+            <span>${!a.is_default ? `<button class="btn btn-ghost btn-sm payout-set-default" data-id="${a.id}">Set default</button>` : ''}</span>
+          </div>
+        `).join('') : '<p class="text-muted">No payout accounts yet -- add one below.</p>'}
+
+        <form id="payout-form" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--color-border);">
+          <div class="field-row">
+            <div class="form-group">
+              <label for="p-type">Account type</label>
+              <select id="p-type">
+                <option value="mobile_money">Mobile Money</option>
+                <option value="bank_account">Bank Account</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="p-provider">Provider</label>
+              <input type="text" id="p-provider" placeholder="e.g. M-Pesa, CRDB Bank">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="form-group">
+              <label for="p-number">Account/phone number</label>
+              <input type="text" id="p-number" placeholder="+255712345678" required>
+            </div>
+            <div class="form-group">
+              <label for="p-name">Account holder name</label>
+              <input type="text" id="p-name" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-sm" id="payout-submit-btn">Add payout account</button>
+        </form>
+      </div>
+
+      <div class="card" style="padding:22px; margin-bottom:20px;">
+        <h3 style="margin-top:0;">Request a withdrawal</h3>
+        <p class="text-muted" style="margin-top:-8px;">Available balance: <strong>${money(walletData.wallet.balance, walletData.wallet.currency)}</strong></p>
+        <div id="withdraw-alert"></div>
+        ${verifiedAccounts.length ? `
+          <form id="withdraw-form">
+            <div class="field-row">
+              <div class="form-group">
+                <label for="w-amount">Amount</label>
+                <input type="number" id="w-amount" min="1" step="1" required>
+              </div>
+              <div class="form-group">
+                <label for="w-account">Payout to</label>
+                <select id="w-account">
+                  ${verifiedAccounts.map((a) => `<option value="${a.id}">${escapeHtml(a.provider || a.account_type)} &middot; ${escapeHtml(a.account_number)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <button type="submit" class="btn" id="withdraw-btn">Request withdrawal</button>
+          </form>
+        ` : `<div class="alert alert-info">Add and verify a payout account above before requesting a withdrawal.</div>`}
+      </div>
+
+      <h4 style="margin-bottom:10px;">Withdrawal history</h4>
+      <div id="withdraw-list">
+        ${results.length ? results.map((w) => `
+          <div class="table-row">
+            <span>${money(w.amount, walletData.wallet.currency)}</span>
+            <span>${escapeHtml(w.payout_account_display || w.destination_type.replace('_', ' '))}</span>
+            <span>${pillForStatus(w.status, statusMap)}</span>
+            <span class="text-muted">${timeAgo(w.created_at)}</span>
+          </div>
+        `).join('') : '<p class="text-muted">No withdrawal requests yet.</p>'}
+      </div>
+    `;
+
+    document.getElementById('payout-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertBox = document.getElementById('payout-alert');
+      const btn = document.getElementById('payout-submit-btn');
+      alertBox.innerHTML = '';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        await apiFetch('/api/wallet/payout-accounts/', {
+          method: 'POST',
+          body: {
+            account_type: document.getElementById('p-type').value,
+            provider: document.getElementById('p-provider').value,
+            account_number: document.getElementById('p-number').value,
+            account_name: document.getElementById('p-name').value,
+          },
+        });
+        renderWithdrawalsTab(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Add payout account';
+      }
+    });
+
+    content.querySelectorAll('.payout-set-default').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          await apiFetch(`/api/wallet/payout-accounts/${btn.dataset.id}/set-default/`, { method: 'POST' });
+          renderWithdrawalsTab(content);
+        } catch (err) {
+          alert(formatApiError(err));
+        }
+      });
+    });
+
+    const withdrawForm = document.getElementById('withdraw-form');
+    if (withdrawForm) {
+      withdrawForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertBox = document.getElementById('withdraw-alert');
+        const btn = document.getElementById('withdraw-btn');
+        alertBox.innerHTML = '';
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>';
+        try {
+          await apiFetch('/api/wallet/withdrawals/', {
+            method: 'POST',
+            body: {
+              amount: document.getElementById('w-amount').value,
+              payout_account: document.getElementById('w-account').value,
+            },
+          });
+          renderWithdrawalsTab(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Request withdrawal';
+        }
+      });
+    }
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+loadMe();
+loadWallet();
+renderTab('listings');
+</script>
+</body>
+</html>

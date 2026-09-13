@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moderation — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<main class="container section" id="gate">
+  <p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
+</main>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+if (!Auth.isLoggedIn()) {
+  window.location.href = 'login.html';
+}
+
+const gate = document.getElementById('gate');
+const STAFF_ROLES = ['moderator', 'admin', 'super_admin'];
+const ADMIN_ROLES = ['admin', 'super_admin'];
+let CURRENT_USER = null;
+
+function pillFor(status, map) {
+  return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace(/_/g, ' '))}</span>`;
+}
+
+/* Generic modal dialog helper. Reuses a single overlay element in the DOM
+   (created lazily) so only one modal is ever open at a time. */
+function openModal(titleHtml, bodyHtml) {
+  let overlay = document.getElementById('global-modal-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'global-modal-overlay';
+    overlay.className = 'modal-overlay hidden';
+    overlay.innerHTML = `
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3 style="margin:0;" id="global-modal-title"></h3>
+          <button class="modal-close-btn" id="global-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" id="global-modal-body"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById('global-modal-close').addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  }
+  document.getElementById('global-modal-title').innerHTML = titleHtml;
+  document.getElementById('global-modal-body').innerHTML = bodyHtml;
+  overlay.classList.remove('hidden');
+  return document.getElementById('global-modal-body');
+}
+
+function closeModal() {
+  const overlay = document.getElementById('global-modal-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+/* Generic sub-tab bar helper: tabs = [{key, label, render}], renders into subContentEl */
+function renderSubTabs(container, tabs, defaultKey) {
+  const barId = `subtabs-${Math.random().toString(36).slice(2, 8)}`;
+  container.innerHTML = `
+    <div class="sub-tabs" id="${barId}">
+      ${tabs.map((t) => `<button class="sub-tab ${t.key === defaultKey ? 'active' : ''}" data-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+    </div>
+    <div class="sub-content"></div>
+  `;
+  const bar = document.getElementById(barId);
+  const subContent = container.querySelector('.sub-content');
+
+  const activate = (key) => {
+    bar.querySelectorAll('.sub-tab').forEach((b) => b.classList.toggle('active', b.dataset.subtab === key));
+    subContent.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+    const tab = tabs.find((t) => t.key === key);
+    if (tab) tab.render(subContent);
+  };
+
+  bar.querySelectorAll('.sub-tab').forEach((btn) => {
+    btn.addEventListener('click', () => activate(btn.dataset.subtab));
+  });
+  activate(defaultKey);
+}
+
+async function init() {
+  let me;
+  try {
+    me = await apiFetch('/api/accounts/me/');
+  } catch (err) {
+    gate.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    return;
+  }
+  if (!STAFF_ROLES.includes(me.role)) {
+    gate.innerHTML = `<div class="empty-state"><h3>Moderator access required</h3><p>Your account (${escapeHtml(me.role)}) doesn't have moderation permissions.</p></div>`;
+    return;
+  }
+  CURRENT_USER = me;
+
+  gate.innerHTML = `
+    <h1 style="margin-bottom:4px;">Moderation</h1>
+    <p class="text-muted" style="margin-top:0;">Signed in as ${escapeHtml(me.username)} (${escapeHtml(me.role)})</p>
+    <div class="dash-tabs">
+      <div class="dash-tab active" data-tab="verifications">Verifications</div>
+      <div class="dash-tab" data-tab="users">Users</div>
+      <div class="dash-tab" data-tab="listings">Listings</div>
+      <div class="dash-tab" data-tab="transactions">Transactions</div>
+      <div class="dash-tab" data-tab="settings">Settings</div>
+      <div class="dash-tab" data-tab="reports">Reports</div>
+    </div>
+    <div id="tab-content"></div>
+  `;
+
+  document.querySelectorAll('.dash-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.dash-tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderTab(tab.dataset.tab);
+    });
+  });
+
+  renderTab('verifications');
+}
+
+function renderTab(tab) {
+  const content = document.getElementById('tab-content');
+  if (tab === 'verifications') {
+    return renderSubTabs(content, [
+      { key: 'kyc', label: 'Identity (KYC)', render: renderVerificationQueue },
+      { key: 'listings', label: 'Listings & AI score', render: renderListingVerificationQueue },
+      { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
+    ], 'kyc');
+  }
+  if (tab === 'users') return renderUsersTab(content);
+  if (tab === 'listings') {
+    return renderSubTabs(content, [
+      { key: 'all', label: 'All listings', render: renderAllListings },
+      { key: 'flags', label: 'Circumvention flags', render: renderFlagsQueue },
+    ], 'all');
+  }
+  if (tab === 'transactions') {
+    return renderSubTabs(content, [
+      { key: 'sales', label: 'Sales', render: renderSalesTab },
+      { key: 'refunds', label: 'Refunds', render: renderRefundsQueue },
+      { key: 'withdrawals', label: 'Withdrawals', render: renderWithdrawalsQueue },
+      { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
+      { key: 'wallet', label: 'Platform wallet & commissions', render: renderPlatformWallet },
+    ], 'sales');
+  }
+  if (tab === 'settings') return renderSettingsTab(content);
+  if (tab === 'reports') {
+    return renderSubTabs(content, [
+      { key: 'reports', label: 'User reports', render: renderReportsQueue },
+      { key: 'queue', label: 'Unified queue', render: renderUnifiedQueue },
+    ], 'reports');
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* VERIFICATIONS tab                                                       */
+/* ---------------------------------------------------------------------- */
+
+async function renderVerificationQueue(content) {
+  try {
+    const data = await apiFetch('/api/accounts/kyc/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>Nothing pending</h3><p>No identity verifications awaiting review.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((v) => `
+      <div class="card" style="padding:20px; margin-bottom:14px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <h3 style="margin:0 0 4px 0;">${escapeHtml((v.id_type || '').toUpperCase())} submission</h3>
+            <p class="text-muted" style="margin:0 0 10px 0; font-size:0.85rem;">Submitted ${timeAgo(v.created_at)}</p>
+            <div style="display:flex; gap:10px; margin-bottom:12px;">
+              <a href="${v.front_image}" target="_blank"><img src="${v.front_image}" alt="ID front" style="width:120px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
+              <a href="${v.selfie_image}" target="_blank"><img src="${v.selfie_image}" alt="Selfie" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
+            </div>
+            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR name:</strong> ${escapeHtml(v.ocr_full_name || '—')}</p>
+            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR ID number:</strong> ${escapeHtml(v.ocr_id_number || '—')}</p>
+            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR DOB:</strong> ${escapeHtml(v.ocr_date_of_birth || '—')}</p>
+            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR confidence:</strong> ${v.ocr_confidence != null ? Math.round(v.ocr_confidence * 100) + '%' : '—'}</p>
+          </div>
+          <div style="min-width:220px;">
+            <div id="kyc-alert-${v.id}"></div>
+            <button class="btn btn-sm btn-block kyc-approve" data-id="${v.id}" style="margin-bottom:8px;">Approve</button>
+            <input type="text" class="kyc-reason" data-id="${v.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-outline btn-sm btn-block kyc-reject" data-id="${v.id}">Reject</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    const doReview = async (id, status) => {
+      const alertBox = document.getElementById(`kyc-alert-${id}`);
+      const reason = document.querySelector(`.kyc-reason[data-id="${id}"]`)?.value || '';
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/accounts/kyc/${id}/review/`, {
+          method: 'PATCH', body: { status, rejection_reason: reason },
+        });
+        renderVerificationQueue(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    };
+    content.querySelectorAll('.kyc-approve').forEach((btn) => btn.addEventListener('click', () => doReview(btn.dataset.id, 'verified')));
+    content.querySelectorAll('.kyc-reject').forEach((btn) => btn.addEventListener('click', () => doReview(btn.dataset.id, 'rejected')));
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+function renderListingFullDetails(listing) {
+  const ai = listing.latest_ai_verification;
+  const scoreRow = (label, value, inverse = false) => {
+    if (value == null) return '';
+    const good = inverse ? value < 30 : value > 70;
+    const bad = inverse ? value > 70 : value < 30;
+    const color = good ? 'var(--color-success)' : (bad ? 'var(--color-danger)' : 'var(--color-gold-dark)');
+    return `<div class="table-row" style="grid-template-columns: 1fr auto;"><span>${label}</span><span style="color:${color}; font-weight:700;">${value}</span></div>`;
+  };
+
+  const mediaHtml = (listing.media || []).length
+    ? `<div style="display:flex; gap:10px; flex-wrap:wrap; margin:10px 0;">
+        ${listing.media.map((m) => `
+          <div style="text-align:center;">
+            <img src="${m.preview_file || m.file}" alt="" style="width:100px;height:70px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);">
+            ${(m.analysis_results || []).map((a) => `<div class="text-muted" style="font-size:0.7rem; margin-top:2px;">${a.flagged ? '<span style="color:var(--color-danger);">⚠ flagged</span>' : 'clean'} &middot; manip. ${a.manipulation_score}</div>`).join('')}
+          </div>
+        `).join('')}
+      </div>`
+    : '<p class="text-muted" style="font-size:0.85rem;">No media attached.</p>';
+
+  const tagsHtml = (listing.tags || []).length
+    ? listing.tags.map((t) => `<span class="pill pill-draft" style="margin-right:4px;">${escapeHtml(t.name)}</span>`).join('')
+    : '<span class="text-muted">none</span>';
+
+  return `
+    <p style="font-size:0.8rem; display:flex; align-items:center; gap:8px;">
+      <strong>Seller:</strong> ${escapeHtml(listing.seller_username)} ${listing.seller_verified_badge ? '<span style="color:var(--color-gold-dark);">&#10003; verified</span>' : ''}
+      <button class="btn btn-outline btn-sm toggle-verified-badge-btn" data-user-id="${listing.seller}" style="padding:2px 8px; font-size:0.75rem;">${listing.seller_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
+    </p>
+    <p style="font-size:0.8rem;"><strong>Location:</strong> ${escapeHtml(listing.location || 'n/a')} &middot; <strong>Tags:</strong> ${tagsHtml}</p>
+    <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Full story body:</p>
+    <div class="card" style="padding:14px; background:#faf8f2; margin-bottom:14px;">
+      <p style="white-space:pre-wrap; font-size:0.85rem; margin:0;">${escapeHtml(listing.body || '(empty)')}</p>
+    </div>
+    <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Attached media:</p>
+    ${mediaHtml}
+    ${ai ? `
+      <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">AI verification breakdown (run ${timeAgo(ai.created_at)}, model: ${escapeHtml(ai.model_name || 'n/a')}):</p>
+      <div style="margin-bottom:8px;">
+        ${scoreRow('Fake news score (higher = more likely fake)', ai.fake_news_score, true)}
+        ${scoreRow('Misinformation score', ai.misinformation_score, true)}
+        ${scoreRow('Clickbait score', ai.clickbait_score, true)}
+        ${scoreRow('Authenticity score', ai.authenticity_score, false)}
+        ${scoreRow('Similarity to existing content', ai.similarity_score, true)}
+        ${scoreRow('Overall risk score', ai.risk_score, true)}
+        ${scoreRow('Model confidence', ai.confidence_score, false)}
+        <div class="table-row" style="grid-template-columns: 1fr auto;"><span>Sentiment</span><span>${ai.sentiment_score}</span></div>
+      </div>
+      ${ai.human_notes ? `<p class="text-muted" style="font-size:0.8rem;"><strong>Prior human notes:</strong> ${escapeHtml(ai.human_notes)}</p>` : ''}
+    ` : '<p class="text-muted" style="font-size:0.85rem;">No AI verification result recorded.</p>'}
+  `;
+}
+
+function wireVerifiedBadgeButton(panel, onDone) {
+  const badgeBtn = panel.querySelector('.toggle-verified-badge-btn');
+  if (!badgeBtn) return;
+  badgeBtn.addEventListener('click', async () => {
+    badgeBtn.disabled = true;
+    try {
+      await apiFetch(`/api/accounts/users/${encodeURIComponent(badgeBtn.dataset.userId)}/toggle-verified-badge/`, { method: 'POST' });
+      if (onDone) await onDone();
+    } catch (err) {
+      alert(formatApiError(err));
+      badgeBtn.disabled = false;
+    }
+  });
+}
+
+async function renderListingVerificationQueue(content) {
+  const verificationMap = {
+    verified: 'pill-verified', partially_verified: 'pill-pending',
+    needs_human_review: 'pill-pending', pending: 'pill-draft', rejected: 'pill-rejected',
+  };
+  try {
+    const data = await apiFetch('/api/news/listings/?queue=1');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>Queue is empty</h3><p>No listings are currently awaiting a verification decision.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((l) => {
+      const scoreColor = l.ai_score == null ? 'var(--color-text-muted)' : (l.ai_score >= 70 ? 'var(--color-success)' : (l.ai_score >= 40 ? 'var(--color-gold-dark)' : 'var(--color-danger)'));
+      return `
+      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <strong>${escapeHtml(l.title)}</strong>
+              ${pillFor(l.verification_status, verificationMap)}
+            </div>
+            <p class="text-muted" style="margin:6px 0; font-size:0.85rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.news_type || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)}</p>
+            <p style="margin:6px 0; font-size:0.85rem;">${escapeHtml(l.description)}</p>
+            <p style="margin:4px 0; font-size:0.85rem;">
+              <strong>AI authenticity score:</strong>
+              <span style="color:${scoreColor}; font-weight:700;">${l.ai_score != null ? l.ai_score : 'n/a'}</span>
+              <span class="text-muted">(higher = more likely genuine; lower = more likely fake news)</span>
+            </p>
+            <a href="listing.html?slug=${encodeURIComponent(l.slug)}" target="_blank" class="text-muted" style="font-size:0.8rem;">Open public listing page &rarr;</a>
+            &middot;
+            <a href="#" class="listmod-toggle-details text-muted" data-slug="${l.slug}" style="font-size:0.8rem; color:var(--color-gold-dark); font-weight:600;">View full details &darr;</a>
+            <div class="listmod-details hidden" id="listmod-details-${l.slug}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
+          </div>
+          <div style="min-width:200px;">
+            <div id="listmod-alert-${l.slug}"></div>
+            <textarea class="listmod-notes" data-slug="${l.slug}" placeholder="Notes (optional)" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
+            <button class="btn btn-sm btn-block listmod-approve" data-slug="${l.slug}" style="margin-bottom:6px;">Approve &amp; publish</button>
+            <button class="btn btn-outline btn-sm btn-block listmod-reject" data-slug="${l.slug}">Reject</button>
+          </div>
+        </div>
+      </div>
+    `;
+    }).join('');
+
+    content.querySelectorAll('.listmod-toggle-details').forEach((link) => {
+      const slug = link.dataset.slug;
+      const panel = document.getElementById(`listmod-details-${slug}`);
+
+      const loadDetails = async () => {
+        panel.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+        try {
+          const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
+          panel.innerHTML = renderListingFullDetails(listing);
+          panel.dataset.loaded = '1';
+          wireVerifiedBadgeButton(panel, loadDetails);
+        } catch (err) {
+          panel.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      };
+
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const isHidden = panel.classList.contains('hidden');
+        if (isHidden) {
+          panel.classList.remove('hidden');
+          link.innerHTML = 'Hide full details &uarr;';
+          if (!panel.dataset.loaded) await loadDetails();
+        } else {
+          panel.classList.add('hidden');
+          link.innerHTML = 'View full details &darr;';
+        }
+      });
+    });
+
+    const doModerate = async (slug, decision) => {
+      const alertBox = document.getElementById(`listmod-alert-${slug}`);
+      const notes = document.querySelector(`.listmod-notes[data-slug="${slug}"]`)?.value || '';
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/moderate/`, { method: 'POST', body: { decision, notes } });
+        renderListingVerificationQueue(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    };
+    content.querySelectorAll('.listmod-approve').forEach((btn) => btn.addEventListener('click', () => doModerate(btn.dataset.slug, 'approve')));
+    content.querySelectorAll('.listmod-reject').forEach((btn) => btn.addEventListener('click', () => doModerate(btn.dataset.slug, 'reject')));
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderPayoutAccountsQueue(content) {
+  try {
+    const data = await apiFetch('/api/wallet/payout-accounts/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No pending payout accounts</h3><p>Nothing awaiting verification.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((a) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <strong>${escapeHtml(a.account_name)}</strong>
+            <p style="margin:4px 0; font-size:0.85rem;">${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</p>
+            <p class="text-muted" style="font-size:0.8rem; margin:0;">${escapeHtml(a.account_type.replace('_', ' '))} &middot; ${timeAgo(a.created_at)}</p>
+          </div>
+          <div style="min-width:200px;">
+            <div id="payout-mod-alert-${a.id}"></div>
+            <button class="btn btn-sm btn-block payout-mod-verify" data-id="${a.id}" style="margin-bottom:6px;">Verify</button>
+            <input type="text" class="payout-mod-reason" data-id="${a.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-outline btn-sm btn-block payout-mod-reject" data-id="${a.id}">Reject</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    const doReview = async (id, status, extra = {}) => {
+      const alertBox = document.getElementById(`payout-mod-alert-${id}`);
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/wallet/payout-accounts/${id}/review/`, { method: 'POST', body: { status, ...extra } });
+        renderPayoutAccountsQueue(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    };
+    content.querySelectorAll('.payout-mod-verify').forEach((btn) => btn.addEventListener('click', () => doReview(btn.dataset.id, 'verified')));
+    content.querySelectorAll('.payout-mod-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const reason = document.querySelector(`.payout-mod-reason[data-id="${btn.dataset.id}"]`)?.value || '';
+        doReview(btn.dataset.id, 'rejected', { rejection_reason: reason });
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* USERS tab                                                                */
+/* ---------------------------------------------------------------------- */
+
+async function renderUsersTab(content) {
+  const isAdmin = ADMIN_ROLES.includes(CURRENT_USER?.role);
+
+  content.innerHTML = `
+    <div class="flex-between" style="margin-bottom:16px; align-items:flex-start;">
+      <div class="field-row" style="flex:1;">
+        <input type="text" id="user-search" placeholder="Search username, email, organization&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <select id="user-role-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+          <option value="">All roles</option>
+          <option value="buyer">Buyer</option>
+          <option value="seller">Seller</option>
+          <option value="journalist">Journalist</option>
+          <option value="media_house">Media house</option>
+          <option value="moderator">Moderator</option>
+          <option value="admin">Admin</option>
+        </select>
+        <select id="user-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="banned">Banned</option>
+          <option value="deactivated">Deactivated</option>
+        </select>
+      </div>
+      ${isAdmin ? `<button class="btn btn-sm" id="user-create-toggle" style="margin-left:12px;">+ New user</button>` : ''}
+    </div>
+    <div id="user-create-form-area"></div>
+    <div id="user-list-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+
+  if (isAdmin) {
+    const createArea = document.getElementById('user-create-form-area');
+    document.getElementById('user-create-toggle').addEventListener('click', () => {
+      if (createArea.dataset.open === '1') {
+        createArea.innerHTML = '';
+        createArea.dataset.open = '';
+        return;
+      }
+      createArea.dataset.open = '1';
+      createArea.innerHTML = `
+        <div class="card" style="padding:18px; margin-bottom:16px; border-color:var(--color-gold);">
+          <h4 style="margin-top:0;">Create a new user</h4>
+          <div id="user-create-alert"></div>
+          <div class="field-row">
+            <div class="form-group"><label>Username</label><input type="text" id="nc-username"></div>
+            <div class="form-group"><label>Email</label><input type="email" id="nc-email"></div>
+          </div>
+          <div class="field-row">
+            <div class="form-group"><label>First name</label><input type="text" id="nc-first"></div>
+            <div class="form-group"><label>Last name</label><input type="text" id="nc-last"></div>
+          </div>
+          <div class="field-row">
+            <div class="form-group"><label>Role</label>
+              <select id="nc-role">
+                <option value="buyer">Buyer</option>
+                <option value="journalist">Journalist</option>
+                <option value="media_house">Media house</option>
+                <option value="moderator">Moderator</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Temporary password</label><input type="text" id="nc-password" placeholder="They should change this after logging in"></div>
+          </div>
+          <button class="btn btn-sm" id="user-create-submit">Create user</button>
+        </div>
+      `;
+      document.getElementById('user-create-submit').addEventListener('click', async () => {
+        const alertBox = document.getElementById('user-create-alert');
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch('/api/accounts/users/', {
+            method: 'POST',
+            body: {
+              username: document.getElementById('nc-username').value,
+              email: document.getElementById('nc-email').value,
+              first_name: document.getElementById('nc-first').value,
+              last_name: document.getElementById('nc-last').value,
+              role: document.getElementById('nc-role').value,
+              password: document.getElementById('nc-password').value,
+            },
+          });
+          createArea.innerHTML = '';
+          createArea.dataset.open = '';
+          loadList();
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    });
+  }
+
+  const statusPill = (u) => u.is_banned ? '<span class="pill pill-rejected">banned</span>'
+    : (u.is_suspended ? '<span class="pill pill-pending">suspended</span>'
+    : (u.is_deleted ? '<span class="pill pill-draft">deactivated</span>' : '<span class="pill pill-verified">active</span>'));
+
+  const loadList = async () => {
+    const listArea = document.getElementById('user-list-area');
+    const params = new URLSearchParams();
+    const q = document.getElementById('user-search').value.trim();
+    const role = document.getElementById('user-role-filter').value;
+    const statusF = document.getElementById('user-status-filter').value;
+    if (q) params.set('q', q);
+    if (role) params.set('role', role);
+    if (statusF) params.set('status', statusF);
+
+    try {
+      const data = await apiFetch(`/api/accounts/users/?${params.toString()}`);
+      const results = data.results || data;
+      if (!results.length) {
+        listArea.innerHTML = `<div class="empty-state"><h3>No users found</h3></div>`;
+        return;
+      }
+      listArea.innerHTML = `<div class="user-cards-grid">${results.map((u) => {
+        const initial = ((u.first_name || u.username || '?').trim().charAt(0) || '?').toUpperCase();
+        return `
+        <div class="user-card" data-id="${u.id}">
+          <div class="user-card-avatar">${u.avatar ? `<img src="${u.avatar}" alt="">` : escapeHtml(initial)}</div>
+          <div class="user-card-body">
+            <div class="user-card-name">${escapeHtml(u.username)} ${u.is_verified_badge ? '<span style="color:var(--color-gold-dark);">&#10003;</span>' : ''}</div>
+            <div class="user-card-email">${escapeHtml(u.email)}</div>
+            <div class="user-card-tags">
+              <span class="pill pill-draft">${escapeHtml((u.role || '').replace('_', ' '))}</span>
+              ${statusPill(u)}
+            </div>
+            <div class="user-card-trust">Trust score: ${u.trust_score}/100</div>
+          </div>
+        </div>
+      `;
+      }).join('')}</div>`;
+
+      listArea.querySelectorAll('.user-card').forEach((card) => {
+        card.addEventListener('click', () => openUserModal(card.dataset.id, loadList));
+      });
+    } catch (err) {
+      listArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('user-search').addEventListener('input', debounce(loadList, 400));
+  document.getElementById('user-role-filter').addEventListener('change', loadList);
+  document.getElementById('user-status-filter').addEventListener('change', loadList);
+  loadList();
+}
+
+async function openUserModal(userId, onChange) {
+  const isAdmin = ADMIN_ROLES.includes(CURRENT_USER?.role);
+  const body = openModal('User details', `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`);
+
+  const refresh = async () => {
+    try {
+      const u = await apiFetch(`/api/accounts/users/${encodeURIComponent(userId)}/`);
+      renderUserModalContent(u, isAdmin, refresh, onChange);
+    } catch (err) {
+      body.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+  await refresh();
+}
+
+function renderUserModalContent(u, isAdmin, refresh, onListChange) {
+  document.getElementById('global-modal-title').innerHTML = `${escapeHtml(u.full_name)} <span class="text-muted" style="font-weight:400; font-size:0.85rem;">@${escapeHtml(u.username)}</span>`;
+  const body = document.getElementById('global-modal-body');
+  const isSelf = u.id === CURRENT_USER?.id;
+
+  const editFormHtml = isAdmin && !isSelf ? `
+    <div class="hidden" id="user-edit-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+      <div id="user-edit-alert"></div>
+      <div class="field-row">
+        <div class="form-group"><label>First name</label><input type="text" id="ue-first" value="${escapeHtml(u.first_name || '')}"></div>
+        <div class="form-group"><label>Last name</label><input type="text" id="ue-last" value="${escapeHtml(u.last_name || '')}"></div>
+      </div>
+      <div class="field-row">
+        <div class="form-group"><label>Email</label><input type="email" id="ue-email" value="${escapeHtml(u.email || '')}"></div>
+        <div class="form-group"><label>Phone</label><input type="text" id="ue-phone" value="${escapeHtml(u.phone_number || '')}"></div>
+      </div>
+      <div class="field-row">
+        <div class="form-group"><label>Role</label>
+          <select id="ue-role">
+            ${['buyer', 'seller', 'journalist', 'media_house', 'moderator', 'admin'].map((r) => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r.replace('_', ' ')}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Organization</label><input type="text" id="ue-org" value="${escapeHtml(u.organization_name || '')}"></div>
+      </div>
+      <button class="btn btn-sm" id="user-edit-save">Save changes</button>
+    </div>
+    <div class="hidden" id="user-password-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+      <div id="user-password-alert"></div>
+      <div class="form-group"><label>New password</label><input type="text" id="up-new-password" placeholder="They'll be notified this was changed"></div>
+      <button class="btn btn-sm" id="user-password-save">Set password</button>
+    </div>
+  ` : '';
+
+  const statusButtons = [];
+  if (u.is_suspended) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unsuspend" style="margin-bottom:6px;">Lift suspension</button>`);
+  if (u.is_banned) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unban" style="margin-bottom:6px;">Lift ban</button>`);
+  if (u.is_deleted) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-reactivate" style="margin-bottom:6px;">Reactivate account</button>`);
+
+  const initial = ((u.first_name || u.username || '?').trim().charAt(0) || '?').toUpperCase();
+
+  body.innerHTML = `
+    <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:16px;">
+      <div class="avatar-circle-lg" style="width:56px; height:56px; font-size:1.3rem;">${u.avatar ? `<img src="${u.avatar}" alt="">` : escapeHtml(initial)}</div>
+      <div>
+        <p class="text-muted" style="margin:0 0 6px 0; font-size:0.85rem;">${escapeHtml(u.email)} &middot; joined ${timeAgo(u.date_joined)}</p>
+        <div class="user-card-tags">
+          <span class="pill pill-draft">${escapeHtml((u.role || '').replace('_', ' '))}</span>
+          ${u.is_banned ? '<span class="pill pill-rejected">banned</span>' : (u.is_suspended ? '<span class="pill pill-pending">suspended</span>' : (u.is_deleted ? '<span class="pill pill-draft">deactivated</span>' : '<span class="pill pill-verified">active</span>'))}
+          ${u.is_verified_badge ? '<span class="pill pill-verified">&#10003; verified badge</span>' : ''}
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; font-size:0.85rem;">
+      <div><strong>Trust score:</strong> ${u.trust_score}/100</div>
+      <div><strong>KYC status:</strong> ${escapeHtml((u.id_verification_status || '').replace('_', ' '))}</div>
+      <div><strong>Phone:</strong> ${escapeHtml(u.phone_number || 'n/a')}</div>
+      <div><strong>Organization:</strong> ${escapeHtml(u.organization_name || 'n/a')}</div>
+      ${u.is_suspended ? `<div><strong>Suspended until:</strong> ${u.suspended_until ? new Date(u.suspended_until).toLocaleDateString() : ''}</div>` : ''}
+    </div>
+    ${u.bio ? `<p style="font-size:0.85rem; margin:0 0 16px 0;"><strong>Bio:</strong> ${escapeHtml(u.bio)}</p>` : ''}
+
+    ${isSelf ? '<p class="text-muted" style="font-size:0.8rem;">This is your own account -- use your profile settings to edit it.</p>' : `
+      <div id="user-mod-alert"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <select id="user-mod-action" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <option value="warning">Warning</option>
+            <option value="temporary_suspension">Temporary suspension</option>
+            <option value="permanent_ban">Permanent ban</option>
+          </select>
+          <button class="btn btn-sm btn-block" id="user-mod-apply" style="margin-bottom:6px;">Apply action</button>
+          ${statusButtons.join('')}
+        </div>
+        <div>
+          <button class="btn btn-outline btn-sm btn-block" id="user-toggle-badge" style="margin-bottom:6px;">${u.is_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
+          ${!u.is_deleted ? `<button class="btn btn-outline btn-sm btn-block" id="user-force-deactivate" style="margin-bottom:6px; border-color:var(--color-danger); color:var(--color-danger);">Force deactivate</button>` : ''}
+          ${isAdmin ? `
+            <button class="btn btn-outline btn-sm btn-block" id="user-edit-toggle" style="margin-bottom:6px;">Edit profile</button>
+            <button class="btn btn-outline btn-sm btn-block" id="user-password-toggle">Set password</button>
+          ` : ''}
+        </div>
+      </div>
+      ${editFormHtml}
+    `}
+  `;
+
+  if (isSelf) return;
+
+  const afterChange = () => { refresh(); if (onListChange) onListChange(); };
+
+  document.getElementById('user-mod-apply').addEventListener('click', async () => {
+    const action = document.getElementById('user-mod-action').value;
+    const alertBox = document.getElementById('user-mod-alert');
+    alertBox.innerHTML = '';
+    try {
+      await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/moderate/`, { method: 'POST', body: { action } });
+      afterChange();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  });
+
+  document.getElementById('user-toggle-badge').addEventListener('click', async () => {
+    try {
+      await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/toggle-verified-badge/`, { method: 'POST' });
+      afterChange();
+    } catch (err) {
+      alert(formatApiError(err));
+    }
+  });
+
+  const deactivateBtn = document.getElementById('user-force-deactivate');
+  if (deactivateBtn) {
+    deactivateBtn.addEventListener('click', async () => {
+      if (!confirm(`Force-deactivate @${u.username}? This blocks their login and unpublishes their listings.`)) return;
+      try {
+        await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/force-deactivate/`, { method: 'POST' });
+        afterChange();
+      } catch (err) {
+        alert(formatApiError(err));
+      }
+    });
+  }
+
+  const reverseStatus = (action, btnId) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      try {
+        await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/reverse-status/`, { method: 'POST', body: { action } });
+        afterChange();
+      } catch (err) {
+        alert(formatApiError(err));
+      }
+    });
+  };
+  reverseStatus('unsuspend', 'user-unsuspend');
+  reverseStatus('unban', 'user-unban');
+  reverseStatus('reactivate', 'user-reactivate');
+
+  if (isAdmin) {
+    const editToggle = document.getElementById('user-edit-toggle');
+    const editForm = document.getElementById('user-edit-form');
+    const passwordToggle = document.getElementById('user-password-toggle');
+    const passwordForm = document.getElementById('user-password-form');
+
+    editToggle.addEventListener('click', () => {
+      editForm.classList.toggle('hidden');
+      passwordForm.classList.add('hidden');
+    });
+    passwordToggle.addEventListener('click', () => {
+      passwordForm.classList.toggle('hidden');
+      editForm.classList.add('hidden');
+    });
+
+    document.getElementById('user-edit-save').addEventListener('click', async () => {
+      const alertBox = document.getElementById('user-edit-alert');
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/`, {
+          method: 'PATCH',
+          body: {
+            first_name: document.getElementById('ue-first').value,
+            last_name: document.getElementById('ue-last').value,
+            email: document.getElementById('ue-email').value,
+            phone_number: document.getElementById('ue-phone').value,
+            role: document.getElementById('ue-role').value,
+            organization_name: document.getElementById('ue-org').value,
+          },
+        });
+        afterChange();
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    });
+
+    document.getElementById('user-password-save').addEventListener('click', async () => {
+      const alertBox = document.getElementById('user-password-alert');
+      alertBox.innerHTML = '';
+      const newPassword = document.getElementById('up-new-password').value;
+      try {
+        await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/set-password/`, { method: 'POST', body: { new_password: newPassword } });
+        alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:8px;">Password updated.</div>`;
+        document.getElementById('up-new-password').value = '';
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    });
+  }
+}
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+/* ---------------------------------------------------------------------- */
+/* LISTINGS tab                                                            */
+/* ---------------------------------------------------------------------- */
+
+async function renderAllListings(content) {
+  content.innerHTML = `
+    <div class="field-row" style="margin-bottom:16px;">
+      <input type="text" id="listing-search" placeholder="Search title/description&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+      <select id="listing-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <option value="">All verification statuses</option>
+        <option value="verified">Verified</option>
+        <option value="partially_verified">Partially verified</option>
+        <option value="needs_human_review">Needs human review</option>
+        <option value="rejected">Rejected</option>
+        <option value="pending">Pending</option>
+      </select>
+    </div>
+    <div id="listing-list-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+  const verificationMap = {
+    verified: 'pill-verified', partially_verified: 'pill-pending',
+    needs_human_review: 'pill-pending', pending: 'pill-draft', rejected: 'pill-rejected',
+  };
+
+  const load = async () => {
+    const listArea = document.getElementById('listing-list-area');
+    const params = new URLSearchParams();
+    const q = document.getElementById('listing-search').value.trim();
+    const vs = document.getElementById('listing-status-filter').value;
+    if (q) params.set('q', q);
+    if (vs) params.set('verification_status', vs);
+
+    try {
+      const data = await apiFetch(`/api/news/listings/?${params.toString()}`);
+      const results = data.results || data;
+      if (!results.length) {
+        listArea.innerHTML = `<div class="empty-state"><h3>No listings found</h3></div>`;
+        return;
+      }
+      listArea.innerHTML = results.map((l) => `
+        <div class="card" style="padding:14px 18px; margin-bottom:10px;">
+          <div class="flex-between" style="align-items:flex-start;">
+            <div>
+              <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+                <strong>${escapeHtml(l.title)}</strong>
+                ${pillFor(l.verification_status, verificationMap)}
+                ${l.featured ? '<span class="pill pill-verified">Featured</span>' : ''}
+              </div>
+              <p class="text-muted" style="margin:4px 0; font-size:0.82rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.status || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)} &middot; ai ${l.ai_score != null ? l.ai_score : 'n/a'}</p>
+            </div>
+            <div style="text-align:right;">
+              <a href="listing.html?slug=${encodeURIComponent(l.slug)}" target="_blank" class="text-muted" style="font-size:0.8rem;">Open &rarr;</a><br>
+              <a href="#" class="all-listing-toggle text-muted" data-slug="${l.slug}" style="font-size:0.8rem; color:var(--color-gold-dark); font-weight:600;">Full details &darr;</a>
+            </div>
+          </div>
+          <div class="all-listing-details hidden" id="all-listing-details-${l.slug}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
+        </div>
+      `).join('');
+
+      listArea.querySelectorAll('.all-listing-toggle').forEach((link) => {
+        const slug = link.dataset.slug;
+        const panel = document.getElementById(`all-listing-details-${slug}`);
+        const loadDetails = async () => {
+          panel.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+          try {
+            const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
+            let html = renderListingFullDetails(listing);
+            html += `
+              <div style="margin-top:12px; display:flex; gap:8px;">
+                <textarea class="all-listing-notes" placeholder="Notes (optional)" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:40px;"></textarea>
+              </div>
+              <div id="all-listing-mod-alert-${slug}" style="margin-top:8px;"></div>
+              <div style="margin-top:8px; display:flex; gap:8px;">
+                <button class="btn btn-sm all-listing-approve" data-slug="${slug}">Approve &amp; publish</button>
+                <button class="btn btn-outline btn-sm all-listing-reject" data-slug="${slug}">Reject</button>
+              </div>
+            `;
+            panel.innerHTML = html;
+            panel.dataset.loaded = '1';
+            wireVerifiedBadgeButton(panel, loadDetails);
+
+            const doModerate = async (decision) => {
+              const alertBox = document.getElementById(`all-listing-mod-alert-${slug}`);
+              const notes = panel.querySelector('.all-listing-notes')?.value || '';
+              alertBox.innerHTML = '';
+              try {
+                await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/moderate/`, { method: 'POST', body: { decision, notes } });
+                load();
+              } catch (err) {
+                alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+              }
+            };
+            panel.querySelector('.all-listing-approve')?.addEventListener('click', () => doModerate('approve'));
+            panel.querySelector('.all-listing-reject')?.addEventListener('click', () => doModerate('reject'));
+          } catch (err) {
+            panel.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          }
+        };
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const isHidden = panel.classList.contains('hidden');
+          if (isHidden) {
+            panel.classList.remove('hidden');
+            link.innerHTML = 'Hide full details &uarr;';
+            if (!panel.dataset.loaded) await loadDetails();
+          } else {
+            panel.classList.add('hidden');
+            link.innerHTML = 'Full details &darr;';
+          }
+        });
+      });
+    } catch (err) {
+      listArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('listing-search').addEventListener('input', debounce(load, 400));
+  document.getElementById('listing-status-filter').addEventListener('change', load);
+  load();
+}
+
+async function renderFlagsQueue(content) {
+  const severityMap = { critical: 'pill-rejected', high: 'pill-rejected', medium: 'pill-pending', low: 'pill-draft' };
+  try {
+    const data = await apiFetch('/api/moderation/flags/?unreviewed=1');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No unreviewed flags</h3><p>The anti-circumvention scanner hasn't found anything pending review.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((f) => `
+      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <strong>${escapeHtml(f.username)}</strong>
+              ${pillFor(f.severity, severityMap)}
+            </div>
+            <p style="margin:6px 0; font-size:0.88rem;">${escapeHtml((f.detected_pattern || '').replace(/_/g, ' '))}: <code>${escapeHtml(f.matched_text)}</code></p>
+            <p class="text-muted" style="font-size:0.8rem; margin:0;">Confidence ${Math.round(f.confidence)}% &middot; ${timeAgo(f.created_at)}</p>
+          </div>
+          <div style="min-width:200px;">
+            <div id="flag-alert-${f.id}"></div>
+            <select class="flag-action" data-id="${f.id}" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+              <option value="warning">Warning</option>
+              <option value="temporary_suspension">Temporary suspension</option>
+              <option value="permanent_ban">Permanent ban</option>
+              <option value="content_blocked">Content blocked</option>
+              <option value="none">No action (false positive)</option>
+            </select>
+            <button class="btn btn-sm btn-block flag-submit" data-id="${f.id}">Apply</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.flag-submit').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const action = document.querySelector(`.flag-action[data-id="${id}"]`).value;
+        const alertBox = document.getElementById(`flag-alert-${id}`);
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch(`/api/moderation/flags/${id}/review/`, { method: 'POST', body: { action } });
+          renderFlagsQueue(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* TRANSACTIONS tab                                                        */
+/* ---------------------------------------------------------------------- */
+
+async function renderSalesTab(content) {
+  content.innerHTML = `
+    <div class="field-row" style="margin-bottom:16px;">
+      <input type="text" id="sales-search" placeholder="Search buyer/seller/listing&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+      <select id="sales-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <option value="">All statuses</option>
+        <option value="paid">Paid</option>
+        <option value="pending_payment">Pending payment</option>
+        <option value="failed">Failed</option>
+        <option value="refunded">Refunded</option>
+      </select>
+      <select id="sales-provider-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <option value="">All providers</option>
+        <option value="selcom">Selcom</option>
+        <option value="nala">Nala/Rafiki</option>
+      </select>
+    </div>
+    <div id="sales-list-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+  const statusMap = { paid: 'pill-verified', pending_payment: 'pill-pending', failed: 'pill-rejected', cancelled: 'pill-rejected', refunded: 'pill-draft' };
+
+  const load = async () => {
+    const listArea = document.getElementById('sales-list-area');
+    const params = new URLSearchParams();
+    const q = document.getElementById('sales-search').value.trim();
+    const st = document.getElementById('sales-status-filter').value;
+    const pv = document.getElementById('sales-provider-filter').value;
+    if (q) params.set('q', q);
+    if (st) params.set('status', st);
+    if (pv) params.set('provider', pv);
+
+    try {
+      const data = await apiFetch(`/api/payments/orders/all/?${params.toString()}`);
+      const results = data.results || data;
+      if (!results.length) {
+        listArea.innerHTML = `<div class="empty-state"><h3>No sales found</h3></div>`;
+        return;
+      }
+      listArea.innerHTML = results.map((o) => `
+        <div class="table-row">
+          <span><a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" target="_blank">${escapeHtml(o.listing_title)}</a></span>
+          <span class="text-muted">${escapeHtml(o.buyer_username)} &rarr; ${escapeHtml(o.seller_username)}</span>
+          <span>${money(o.amount, o.currency)}</span>
+          <span>${escapeHtml(o.payment_provider)}</span>
+          <span>${pillFor(o.status, statusMap)}</span>
+          <span class="text-muted">${timeAgo(o.created_at)}</span>
+        </div>
+      `).join('');
+    } catch (err) {
+      listArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('sales-search').addEventListener('input', debounce(load, 400));
+  document.getElementById('sales-status-filter').addEventListener('change', load);
+  document.getElementById('sales-provider-filter').addEventListener('change', load);
+  load();
+}
+
+async function renderRefundsQueue(content) {
+  try {
+    const data = await apiFetch('/api/payments/refunds/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No pending refund requests</h3></div>`;
+      return;
+    }
+    content.innerHTML = results.map((r) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <strong>${money(r.amount)}</strong>
+            <p style="margin:4px 0; font-size:0.85rem;">${escapeHtml(r.reason)}</p>
+            <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(r.created_at)}</p>
+          </div>
+          <div style="min-width:200px;">
+            <div id="refund-alert-${r.id}"></div>
+            <button class="btn btn-sm btn-block refund-action" data-id="${r.id}" data-status="completed" style="margin-bottom:6px;">Approve &amp; refund now</button>
+            <button class="btn btn-outline btn-sm btn-block refund-action" data-id="${r.id}" data-status="rejected">Reject</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.refund-action').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const alertBox = document.getElementById(`refund-alert-${id}`);
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch(`/api/payments/refunds/${id}/review/`, { method: 'POST', body: { status: btn.dataset.status } });
+          renderRefundsQueue(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderWithdrawalsQueue(content) {
+  try {
+    const data = await apiFetch('/api/wallet/withdrawals/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No pending withdrawal requests</h3></div>`;
+      return;
+    }
+    content.innerHTML = results.map((w) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <strong>${escapeHtml(w.wallet_owner_username)}</strong> &middot; ${money(w.amount)}
+            <p class="text-muted" style="margin:4px 0; font-size:0.85rem;">${escapeHtml(w.destination_type.replace('_',' '))} &middot; ${escapeHtml(JSON.stringify(w.destination_details))}</p>
+            <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(w.created_at)}</p>
+          </div>
+          <div style="min-width:220px;">
+            <div id="wd-alert-${w.id}"></div>
+            <input type="text" class="wd-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-sm btn-block wd-complete" data-id="${w.id}" style="margin-bottom:6px;">Mark paid</button>
+            <input type="text" class="wd-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-outline btn-sm btn-block wd-reject" data-id="${w.id}">Reject</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    content.querySelectorAll('.wd-complete').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const alertBox = document.getElementById(`wd-alert-${id}`);
+        const ref = document.querySelector(`.wd-payout-ref[data-id="${id}"]`)?.value || '';
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch(`/api/wallet/withdrawals/${id}/review/`, { method: 'POST', body: { status: 'completed', payout_reference: ref } });
+          renderWithdrawalsQueue(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    });
+    content.querySelectorAll('.wd-reject').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const alertBox = document.getElementById(`wd-alert-${id}`);
+        const reason = document.querySelector(`.wd-reject-reason[data-id="${id}"]`)?.value || '';
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch(`/api/wallet/withdrawals/${id}/review/`, { method: 'POST', body: { status: 'rejected', rejection_reason: reason } });
+          renderWithdrawalsQueue(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderPlatformWallet(content) {
+  try {
+    const data = await apiFetch('/api/wallet/platform/');
+    const w = data.wallet;
+    content.innerHTML = `
+      <div class="card" style="padding:20px; margin-bottom:18px;">
+        <p class="text-muted" style="margin:0;">Platform commission balance</p>
+        <div style="font-size:2rem; font-weight:700;">${money(w.balance, w.currency)}</div>
+        <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">${data.commission_entries_last_30_days} commission entries in the last 30 days</p>
+      </div>
+      <h4 style="margin-bottom:10px;">Recent ledger entries</h4>
+      ${data.recent_entries.length ? data.recent_entries.map((e) => `
+        <div class="table-row">
+          <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
+          <span>${money(e.amount)}</span>
+          <span class="text-muted">balance after: ${money(e.balance_after)}</span>
+          <span class="text-muted">${escapeHtml(e.description || '')}</span>
+          <span class="text-muted">${timeAgo(e.created_at)}</span>
+        </div>
+      `).join('') : '<p class="text-muted">No ledger entries yet.</p>'}
+    `;
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* SETTINGS tab                                                            */
+/* ---------------------------------------------------------------------- */
+
+const PROVIDER_META = {
+  selcom: {
+    label: 'Selcom (local payments)',
+    fields: [
+      { name: 'api_key', label: 'API Key', secret: true },
+      { name: 'api_secret', label: 'API Secret', secret: true },
+      { name: 'vendor_id', label: 'Vendor ID', secret: false },
+      { name: 'base_url', label: 'API Base URL', secret: false },
+    ],
+  },
+  nala: {
+    label: 'Nala/Rafiki (international)',
+    note: 'Placeholder integration built from unconfirmed API conventions -- see payments/nala_client.py. Saving real credentials here will not process real payments until that file is updated against Nala\'s actual API reference.',
+    fields: [
+      { name: 'api_key', label: 'API Key', secret: true },
+      { name: 'api_secret', label: 'API Secret', secret: true },
+      { name: 'webhook_secret', label: 'Webhook Secret', secret: true },
+      { name: 'base_url', label: 'API Base URL', secret: false },
+    ],
+  },
+  ai_verification: {
+    label: 'AI Verification',
+    note: 'Leave API URL blank to use the built-in local heuristic engine.',
+    fields: [
+      { name: 'api_url', label: 'External API URL (optional)', secret: false },
+    ],
+  },
+  email: {
+    label: 'Email (SMTP)',
+    note: 'Leave Host blank to use the console backend (emails print to the server log instead of sending).',
+    fields: [
+      { name: 'host', label: 'SMTP Host', secret: false },
+      { name: 'port', label: 'Port', secret: false },
+      { name: 'username', label: 'Username', secret: false },
+      { name: 'password', label: 'Password', secret: true },
+      { name: 'use_tls', label: 'Use TLS (true/false)', secret: false },
+      { name: 'from_email', label: 'From address', secret: false },
+    ],
+  },
+};
+
+async function renderSettingsTab(content) {
+  const isAdmin = ADMIN_ROLES.includes(CURRENT_USER?.role);
+  content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  try {
+    const statusData = await apiFetch('/api/system-status/');
+
+    content.innerHTML = `
+      <h3 style="margin-bottom:4px;">Integrations</h3>
+      <p class="text-muted" style="font-size:0.85rem; margin-top:0;">
+        ${isAdmin ? 'Credentials are encrypted at rest and never shown in full once saved -- only a masked hint. Saved changes take effect immediately, no server restart needed.' : 'Viewing only -- editing credentials requires an admin account.'}
+      </p>
+      <div id="providers-area"></div>
+      ${statusData.debug_mode ? `<div class="alert alert-error" style="margin:20px 0;"><strong>DEBUG mode is ON.</strong> This should be OFF in production.</div>` : ''}
+      <h3 style="margin-bottom:12px; margin-top:24px;">Recent activity (audit log)</h3>
+      <div id="audit-log-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+    `;
+
+    const providersArea = document.getElementById('providers-area');
+    providersArea.innerHTML = Object.keys(PROVIDER_META).map((key) => renderProviderCard(key, statusData[key], isAdmin)).join('');
+
+    Object.keys(PROVIDER_META).forEach((key) => wireProviderCard(key, isAdmin));
+
+    const auditArea = document.getElementById('audit-log-area');
+    try {
+      const logData = await apiFetch('/api/audit-log/');
+      const logResults = logData.results || logData;
+      auditArea.innerHTML = logResults.length ? logResults.slice(0, 50).map((e) => `
+        <div class="table-row">
+          <span>${escapeHtml((e.action || '').replace(/_/g, ' '))}</span>
+          <span class="text-muted">${escapeHtml(e.actor_username || 'system')}</span>
+          <span class="text-muted">${escapeHtml(e.target_model || '')}</span>
+          <span class="text-muted" style="font-size:0.8rem;">${escapeHtml(e.description || '')}</span>
+          <span class="text-muted">${timeAgo(e.created_at)}</span>
+        </div>
+      `).join('') : '<p class="text-muted">No activity logged yet.</p>';
+    } catch (err) {
+      auditArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+function renderProviderCard(providerKey, fieldsStatus, isAdmin) {
+  const meta = PROVIDER_META[providerKey];
+  const allSet = meta.fields.every((f) => fieldsStatus[f.name]?.is_set);
+  const anySet = meta.fields.some((f) => fieldsStatus[f.name]?.is_set);
+  const overallColor = allSet ? 'var(--color-success)' : (anySet ? 'var(--color-gold-dark)' : 'var(--color-text-muted)');
+  const overallLabel = allSet ? 'Configured' : (anySet ? 'Partially configured' : 'Not configured');
+
+  return `
+    <div class="card" style="padding:20px; margin-bottom:16px;">
+      <div class="flex-between" style="align-items:flex-start; margin-bottom:10px;">
+        <div>
+          <h4 style="margin:0 0 2px 0;">${escapeHtml(meta.label)}</h4>
+          <span style="font-size:0.8rem; font-weight:700; color:${overallColor};">${overallLabel}</span>
+        </div>
+        ${isAdmin ? `<button class="btn btn-outline btn-sm test-connection-btn" data-provider="${providerKey}">Test connection</button>` : ''}
+      </div>
+      ${meta.note ? `<p class="text-muted" style="font-size:0.78rem; margin:0 0 12px 0;">${escapeHtml(meta.note)}</p>` : ''}
+      <div id="test-result-${providerKey}"></div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:10px;">
+        ${meta.fields.map((f) => {
+          const fstatus = fieldsStatus[f.name] || { is_set: false, value: '', source: 'unset' };
+          const currentHint = f.secret
+            ? (fstatus.is_set ? `Currently: ${escapeHtml(fstatus.value)} (${fstatus.source})` : 'Not set')
+            : null;
+          const prefillValue = f.secret ? '' : escapeHtml(fstatus.value || '');
+          return `
+            <div class="form-group" style="margin-bottom:0;">
+              <label style="display:flex; justify-content:space-between; align-items:center;">
+                <span>${escapeHtml(f.label)}</span>
+                ${isAdmin && f.secret && fstatus.is_set ? `<a href="#" class="clear-field-link text-muted" data-provider="${providerKey}" data-field="${f.name}" style="font-size:0.72rem; font-weight:600;">Clear</a>` : ''}
+              </label>
+              <input type="${f.secret ? 'password' : 'text'}" class="provider-field-input" data-provider="${providerKey}" data-field="${f.name}"
+                     value="${prefillValue}" placeholder="${f.secret ? (fstatus.is_set ? 'Leave blank to keep current value' : 'Not set') : ''}"
+                     ${!isAdmin ? 'disabled' : ''}>
+              ${currentHint ? `<span class="text-muted" style="font-size:0.72rem;">${currentHint}</span>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+      ${isAdmin ? `
+        <div id="save-alert-${providerKey}" style="margin-top:10px;"></div>
+        <button class="btn btn-sm" data-provider="${providerKey}" id="save-provider-${providerKey}" style="margin-top:10px;">Save ${escapeHtml(meta.label)} settings</button>
+      ` : ''}
+    </div>
+  `;
+}
+
+function wireProviderCard(providerKey, isAdmin) {
+  if (!isAdmin) return;
+
+  document.getElementById(`save-provider-${providerKey}`)?.addEventListener('click', async () => {
+    const btn = document.getElementById(`save-provider-${providerKey}`);
+    const alertBox = document.getElementById(`save-alert-${providerKey}`);
+    alertBox.innerHTML = '';
+
+    const body = {};
+    document.querySelectorAll(`.provider-field-input[data-provider="${providerKey}"]`).forEach((input) => {
+      if (input.value !== '') {
+        body[input.dataset.field] = input.value;
+      }
+    });
+    if (Object.keys(body).length === 0) {
+      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:8px;">Nothing to save -- fill in at least one field, or use "Clear" to remove an existing value.</div>`;
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      await apiFetch(`/api/integration-credentials/${providerKey}/`, { method: 'POST', body });
+      alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:8px;">Saved. Takes effect immediately.</div>`;
+      setTimeout(() => {
+        const tab = document.getElementById('tab-content');
+        renderSettingsTab(tab);
+      }, 1100);
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:8px;">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+      btn.textContent = `Save ${PROVIDER_META[providerKey].label} settings`;
+    }
+  });
+
+  document.querySelectorAll(`.clear-field-link[data-provider="${providerKey}"]`).forEach((link) => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (!confirm(`Clear the saved ${link.dataset.field.replace(/_/g, ' ')}? This reverts to the .env fallback (if any).`)) return;
+      try {
+        await apiFetch(`/api/integration-credentials/${providerKey}/`, { method: 'POST', body: { [link.dataset.field]: '' } });
+        const tab = document.getElementById('tab-content');
+        renderSettingsTab(tab);
+      } catch (err) {
+        alert(formatApiError(err));
+      }
+    });
+  });
+
+  document.querySelector(`.test-connection-btn[data-provider="${providerKey}"]`)?.addEventListener('click', async () => {
+    const btn = document.querySelector(`.test-connection-btn[data-provider="${providerKey}"]`);
+    const resultArea = document.getElementById(`test-result-${providerKey}`);
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span>';
+    resultArea.innerHTML = '';
+    try {
+      const result = await apiFetch(`/api/integration-credentials/${providerKey}/test-connection/`, { method: 'POST', body: {} });
+      const cls = result.success ? 'alert-success' : 'alert-error';
+      resultArea.innerHTML = `<div class="alert ${cls}" style="font-size:0.82rem; padding:10px; margin-bottom:10px;">${escapeHtml(result.message)}</div>`;
+    } catch (err) {
+      resultArea.innerHTML = `<div class="alert alert-error" style="font-size:0.82rem; padding:10px; margin-bottom:10px;">${escapeHtml(formatApiError(err))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
+async function renderReportsQueue(content) {
+  try {
+    const data = await apiFetch('/api/moderation/reports/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No reports filed</h3></div>`;
+      return;
+    }
+    content.innerHTML = `
+      <p class="text-muted" style="margin-bottom:14px;">Reports are resolved via the Unified Queue sub-tab (each filed report also creates a queue item).</p>
+    ` + results.map((r) => `
+      <div class="table-row">
+        <span>${escapeHtml((r.reason || '').replace(/_/g, ' '))}</span>
+        <span class="text-muted">${escapeHtml(r.details || '')}</span>
+        <span class="text-muted">${timeAgo(r.created_at)}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderUnifiedQueue(content) {
+  const priorityMap = { urgent: 'pill-rejected', high: 'pill-rejected', normal: 'pill-pending', low: 'pill-draft' };
+  try {
+    const data = await apiFetch('/api/moderation/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>Queue is empty</h3><p>No open items.</p></div>`;
+      return;
+    }
+    content.innerHTML = results.map((item) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between">
+          <div>
+            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <strong>${escapeHtml((item.item_type || '').replace(/_/g, ' '))}</strong>
+              ${pillFor(item.priority, priorityMap)}
+            </div>
+            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.8rem;">${timeAgo(item.created_at)} &middot; ref ${item.related_object_id.slice(0,8)}</p>
+          </div>
+          <div style="text-align:right;">
+            <button class="btn btn-outline btn-sm queue-assign" data-id="${item.id}">Assign to me</button>
+            <button class="btn btn-sm queue-resolve" data-id="${item.id}">Resolve</button>
+            <button class="btn btn-ghost btn-sm queue-dismiss" data-id="${item.id}">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    const doAction = async (id, endpoint, body) => {
+      try {
+        await apiFetch(`/api/moderation/queue/${id}/${endpoint}/`, { method: 'POST', body });
+        renderUnifiedQueue(content);
+      } catch (err) {
+        alert(formatApiError(err));
+      }
+    };
+    content.querySelectorAll('.queue-assign').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'assign', {})));
+    content.querySelectorAll('.queue-resolve').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'resolve', { status: 'resolved', resolution_notes: 'Resolved via moderation dashboard.' })));
+    content.querySelectorAll('.queue-dismiss').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'resolve', { status: 'dismissed' })));
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>

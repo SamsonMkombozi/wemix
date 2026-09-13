@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<div class="auth-shell">
+  <div class="card form-card">
+    <h2>Welcome back</h2>
+    <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Log in to your Habari Platform account.</p>
+
+    <div id="form-alert"></div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="email">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="current-password">
+      </div>
+
+      <div class="form-group hidden" id="twofa-group">
+        <label for="two_factor_code">Two-factor code</label>
+        <input type="text" id="two_factor_code" inputmode="numeric" maxlength="6" placeholder="6-digit code">
+        <div class="form-hint">Your account has 2FA enabled &mdash; enter the code from your authenticator app.</div>
+      </div>
+
+      <button type="submit" class="btn btn-block" id="submit-btn">Log in</button>
+    </form>
+
+    <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+      New here? <a href="register.html" style="color:var(--color-gold-dark); font-weight:600;">Create an account</a>
+    </p>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+let needsTwoFactor = false;
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const alertBox = document.getElementById('form-alert');
+  const submitBtn = document.getElementById('submit-btn');
+  alertBox.innerHTML = '';
+
+  const payload = {
+    email: document.getElementById('email').value,
+    password: document.getElementById('password').value,
+  };
+  if (needsTwoFactor) {
+    payload.two_factor_code = document.getElementById('two_factor_code').value;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner"></span> Logging in&hellip;';
+
+  try {
+    const data = await apiFetch('/api/accounts/login/', { method: 'POST', body: payload, auth: false });
+    Auth.setSession({ access: data.access, refresh: data.refresh, user: data.user });
+    const isStaff = ['moderator', 'admin', 'super_admin'].includes(data.user?.role);
+    window.location.href = isStaff ? 'moderator.html' : 'dashboard.html';
+  } catch (err) {
+    const fieldErrors = err.data && err.data.two_factor_code;
+    if (fieldErrors && !needsTwoFactor) {
+      needsTwoFactor = true;
+      document.getElementById('twofa-group').classList.remove('hidden');
+      alertBox.innerHTML = `<div class="alert alert-info">Enter your two-factor code to continue.</div>`;
+    } else {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Log in';
+  }
+});
+</script>
+</body>
+</html>

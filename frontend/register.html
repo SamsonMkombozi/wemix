@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create account — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<div class="auth-shell">
+  <div class="card form-card">
+    <h2>Create your account</h2>
+    <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Join as a buyer, journalist, or media house.</p>
+
+    <div id="form-alert"></div>
+
+    <form id="register-form">
+      <div class="field-row">
+        <div class="form-group">
+          <label for="first_name">First name</label>
+          <input type="text" id="first_name" autocomplete="given-name">
+        </div>
+        <div class="form-group">
+          <label for="last_name">Last name</label>
+          <input type="text" id="last_name" autocomplete="family-name">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" required autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="email">
+      </div>
+
+      <div class="form-group">
+        <label for="phone_number">Phone number</label>
+        <input type="text" id="phone_number" placeholder="+255712345678">
+      </div>
+
+      <div class="form-group">
+        <label for="role">I am a&hellip;</label>
+        <select id="role">
+          <option value="buyer">Buyer &mdash; I want to purchase verified news</option>
+          <option value="journalist">Journalist &mdash; I want to sell news</option>
+          <option value="seller">Seller &mdash; I want to sell news</option>
+          <option value="media_house">Media House &mdash; organization account</option>
+        </select>
+      </div>
+
+      <div class="form-group hidden" id="org-name-group">
+        <label for="organization_name">Organization name</label>
+        <input type="text" id="organization_name">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="new-password">
+      </div>
+
+      <div class="form-group">
+        <label for="password_confirm">Confirm password</label>
+        <input type="password" id="password_confirm" required autocomplete="new-password">
+      </div>
+
+      <button type="submit" class="btn btn-block" id="submit-btn">Create account</button>
+    </form>
+
+    <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+      Already have an account? <a href="login.html" style="color:var(--color-gold-dark); font-weight:600;">Log in</a>
+    </p>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+document.getElementById('role').addEventListener('change', (e) => {
+  document.getElementById('org-name-group').classList.toggle('hidden', e.target.value !== 'media_house');
+});
+
+document.getElementById('register-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const alertBox = document.getElementById('form-alert');
+  const submitBtn = document.getElementById('submit-btn');
+  alertBox.innerHTML = '';
+
+  const payload = {
+    first_name: document.getElementById('first_name').value,
+    last_name: document.getElementById('last_name').value,
+    username: document.getElementById('username').value,
+    email: document.getElementById('email').value,
+    phone_number: document.getElementById('phone_number').value,
+    role: document.getElementById('role').value,
+    organization_name: document.getElementById('organization_name').value,
+    password: document.getElementById('password').value,
+    password_confirm: document.getElementById('password_confirm').value,
+  };
+
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner"></span> Creating account&hellip;';
+
+  try {
+    await apiFetch('/api/accounts/register/', { method: 'POST', body: payload, auth: false });
+    alertBox.innerHTML = `<div class="alert alert-success">Account created! Check your email (or the server console, in dev) to verify your address, then log in.</div>`;
+    document.getElementById('register-form').reset();
+    setTimeout(() => { window.location.href = 'login.html'; }, 1800);
+  } catch (err) {
+    alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create account';
+  }
+});
+</script>
+</body>
+</html>
