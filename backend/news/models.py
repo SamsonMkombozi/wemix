@@ -156,6 +156,24 @@ class NewsListing(BaseModel):
         return (self.price * commission_rate).quantize(Decimal("0.01"))
 
 
+class NewsListingRevision(BaseModel):
+    """A snapshot of a listing's editable fields taken right before an
+    edit is saved -- lets a seller (or moderator) see what a published,
+    already-purchasable listing looked like before a correction, without
+    needing full event-sourcing."""
+
+    listing = models.ForeignKey(NewsListing, on_delete=models.CASCADE, related_name="revisions")
+    edited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    snapshot = models.JSONField(
+        default=dict, help_text="title/description/body/byline/dateline/price/location as they were before this edit."
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 def news_media_upload_path(instance, filename):
     return f"news/{instance.listing_id}/{uuid.uuid4()}_{filename}"
 
@@ -317,6 +335,38 @@ class Follow(BaseModel):
 
     def __str__(self):
         return f"{self.follower_id} follows {self.followed_id}"
+
+
+class SocialShareRecord(BaseModel):
+    """Copyright/usage-tracking log of a buyer sharing purchased content
+    to an external platform. For providers with a real unauthenticated
+    share-intent URL (Facebook/X/LinkedIn/WhatsApp), this is created at
+    the moment we hand back that URL -- we can't confirm the user
+    actually completed the post (the intent opens in a new tab we don't
+    control), only that they requested to. For providers that need real
+    OAuth app credentials we don't have (Instagram/TikTok/YouTube), this
+    just records manual-share intent alongside a copy-paste caption."""
+
+    class Provider(models.TextChoices):
+        FACEBOOK = "facebook", "Facebook"
+        X = "x", "X (Twitter)"
+        LINKEDIN = "linkedin", "LinkedIn"
+        WHATSAPP = "whatsapp", "WhatsApp"
+        INSTAGRAM = "instagram", "Instagram"
+        TIKTOK = "tiktok", "TikTok"
+        YOUTUBE = "youtube", "YouTube"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_shares")
+    listing = models.ForeignKey(NewsListing, on_delete=models.CASCADE, related_name="social_shares")
+    order = models.ForeignKey("payments.Order", on_delete=models.SET_NULL, null=True, blank=True, related_name="social_shares")
+    provider = models.CharField(max_length=20, choices=Provider.choices)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["listing", "provider"])]
+
+    def __str__(self):
+        return f"{self.user_id} shared '{self.listing.title}' to {self.provider}"
 
 
 class ListingView(BaseModel):

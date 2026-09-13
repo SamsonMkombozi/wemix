@@ -10,43 +10,63 @@
 </head>
 <body>
 
-<div id="topnav-root"></div>
+<div class="auth-page">
+  <aside class="auth-panel-brand">
+    <div class="auth-panel-wordmark">WEMIX<span>.</span></div>
+    <div class="auth-panel-content">
+      <span class="auth-panel-eyebrow">Global News Market</span>
+      <h1>Verified news, direct from the source.</h1>
+      <p>Sign in to buy exclusive, fact-checked stories or manage the news you've published for sale.</p>
+    </div>
+    <ul class="auth-panel-points">
+      <li>AI + human moderator verification on every story</li>
+      <li>Direct wallet payouts to journalists and media houses</li>
+      <li>Buyer protection with a tracked refund process</li>
+    </ul>
+    <div class="auth-panel-foot">&copy; 2026 WEMIX &mdash; Global News Market</div>
+  </aside>
 
-<div class="auth-shell">
-  <div class="card form-card">
-    <h2>Welcome back</h2>
-    <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Log in to your Habari Platform account.</p>
+  <div class="auth-form-col">
+    <div class="auth-form-topbar">
+      <a href="index.html"><img src="images/wemix.jpeg" alt="WEMIX"></a>
+      <a href="index.html" class="auth-back-link">&larr; Back to marketplace</a>
+    </div>
+    <div class="auth-form-center">
+      <div class="card auth-form-card" style="padding:32px;">
+        <h2>Welcome back</h2>
+        <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Log in to your WEMIX account.</p>
 
-    <div id="form-alert"></div>
+        <div id="form-alert"></div>
 
-    <form id="login-form">
-      <div class="form-group">
-        <label for="email">Email</label>
-        <input type="email" id="email" required autocomplete="email">
+        <form id="login-form">
+          <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" required autocomplete="email">
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" required autocomplete="current-password">
+          </div>
+
+          <div class="form-group hidden" id="twofa-group">
+            <label for="two_factor_code">Two-factor code</label>
+            <input type="text" id="two_factor_code" inputmode="numeric" maxlength="6" placeholder="6-digit code">
+            <div class="form-hint">Your account has 2FA enabled &mdash; enter the code from your authenticator app.</div>
+          </div>
+
+          <button type="submit" class="btn btn-block" id="submit-btn">Log in</button>
+        </form>
+
+        <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+          New here? <a href="register.html" style="color:var(--color-gold-dark); font-weight:600;">Create an account</a>
+        </p>
       </div>
-
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" required autocomplete="current-password">
-      </div>
-
-      <div class="form-group hidden" id="twofa-group">
-        <label for="two_factor_code">Two-factor code</label>
-        <input type="text" id="two_factor_code" inputmode="numeric" maxlength="6" placeholder="6-digit code">
-        <div class="form-hint">Your account has 2FA enabled &mdash; enter the code from your authenticator app.</div>
-      </div>
-
-      <button type="submit" class="btn btn-block" id="submit-btn">Log in</button>
-    </form>
-
-    <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
-      New here? <a href="register.html" style="color:var(--color-gold-dark); font-weight:600;">Create an account</a>
-    </p>
+    </div>
   </div>
 </div>
 
 <script src="js/api.js"></script>
-<script src="js/nav.js"></script>
 <script>
 let needsTwoFactor = false;
 

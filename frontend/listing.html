@@ -34,6 +34,64 @@ function pillForVerification(status) {
   return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace('_', ' '))}</span>`;
 }
 
+async function downloadMedia(btn) {
+  // Two-step signed-URL flow: this authenticated call verifies purchase
+  // and mints a short-lived (5 min) token; the actual file bytes then
+  // come from a plain, unauthenticated download link built from that
+  // token, so a simple <a download> click triggers the browser's normal
+  // save flow -- no blob/object-URL plumbing needed on this end.
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Preparing&hellip;';
+  try {
+    const { download_url } = await apiFetch(`/api/news/listings/${encodeURIComponent(btn.dataset.slug)}/download/${encodeURIComponent(btn.dataset.mediaId)}/`);
+    const a = document.createElement('a');
+    a.href = download_url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (err) {
+    alert(formatApiError ? formatApiError(err) : (err.message || 'Download failed.'));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+async function shareToSocial(btn) {
+  const resultEl = document.getElementById('social-share-result');
+  btn.disabled = true;
+  resultEl.innerHTML = '';
+  try {
+    const data = await apiFetch(`/api/news/listings/${encodeURIComponent(btn.dataset.slug)}/social-share/`, {
+      method: 'POST', body: { provider: btn.dataset.provider },
+    });
+    if (!data.manual) {
+      window.open(data.share_url, '_blank', 'noopener,width=600,height=500');
+    } else {
+      resultEl.innerHTML = `
+        <div class="alert alert-info" style="font-size:0.85rem;">
+          ${escapeHtml(data.detail)}
+          <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+            <input type="text" readonly value="${escapeHtml(data.caption)}" style="flex:1; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="social-caption-input">
+            <button class="btn btn-sm" id="social-caption-copy">Copy caption</button>
+          </div>
+        </div>
+      `;
+      document.getElementById('social-caption-copy').addEventListener('click', () => {
+        const input = document.getElementById('social-caption-input');
+        input.select();
+        navigator.clipboard?.writeText(input.value).catch(() => document.execCommand('copy'));
+      });
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function loadListing() {
   if (!slug) {
     content.innerHTML = `<div class="alert alert-error">No listing specified.</div>`;
@@ -106,6 +164,35 @@ function renderListing(listing) {
         <p style="margin:6px 0 14px 0;">${ratingHtml}</p>
         <p>${escapeHtml(listing.description)}</p>
         ${bodyHtml}
+        ${!listing.body_locked && (listing.media || []).length ? `
+          <div class="card" style="padding:16px 20px; margin-top:14px;">
+            <h4 style="margin:0 0 10px 0;">Download original media</h4>
+            <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">You've unlocked this story -- these are the original files, not the watermarked/preview versions shown above. Purchasing access doesn't transfer copyright; see the Terms for permitted use.</p>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${listing.media.map((m) => `
+                <button class="btn btn-outline btn-sm media-download-btn" data-slug="${listing.slug}" data-media-id="${m.id}" style="justify-content:flex-start; text-align:left;">
+                  &#8681; ${escapeHtml(m.media_type)}${m.is_cover ? ' (cover)' : ''}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        ${!listing.body_locked ? `
+          <div class="card" style="padding:16px 20px; margin-top:14px;">
+            <h4 style="margin:0 0 10px 0;">Share to social media</h4>
+            <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">Facebook, X, LinkedIn and WhatsApp open a real share dialog for your own account. Instagram, TikTok and YouTube don't offer a direct-post link without a registered developer app, so those give you a ready-to-paste caption instead.</p>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="facebook">Facebook</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="x">X</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="linkedin">LinkedIn</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="whatsapp">WhatsApp</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="instagram">Instagram</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="tiktok">TikTok</button>
+              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="youtube">YouTube</button>
+            </div>
+            <div id="social-share-result" style="margin-top:10px;"></div>
+          </div>
+        ` : ''}
         <div id="reviews-section" style="margin-top:28px;"></div>
       </div>
       <div>
@@ -121,6 +208,14 @@ function renderListing(listing) {
 
   renderBuyArea(listing, isOwner);
   renderReviewsSection(listing);
+
+  content.querySelectorAll('.media-download-btn').forEach((btn) => {
+    btn.addEventListener('click', () => downloadMedia(btn));
+  });
+
+  content.querySelectorAll('.social-share-btn').forEach((btn) => {
+    btn.addEventListener('click', () => shareToSocial(btn));
+  });
 
   const bookmarkBtn = document.getElementById('bookmark-btn');
   if (bookmarkBtn) {

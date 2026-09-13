@@ -224,3 +224,185 @@ class RefundRequestReviewView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(RefundRequestSerializer(refund).data)
+
+
+class FinancialReportView(APIView):
+    """GET /api/payments/reports/?period=daily|weekly|monthly|yearly
+    (&from=YYYY-MM-DD&to=YYYY-MM-DD) -- rolled-up gross sales, platform
+    commission, and refunds per period bucket, for the moderation
+    dashboard's Reports > Financials screen. No prior endpoint answered
+    'how much revenue this week/month/year' -- only raw per-transaction
+    lists existed."""
+
+    permission_classes = [IsModeratorOrAbove]
+
+    def get(self, request):
+        from datetime import datetime
+
+        from django.conf import settings
+        from django.db.models import Count, Sum
+        from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncYear
+
+        trunc_fn = {"daily": TruncDate, "weekly": TruncWeek, "monthly": TruncMonth, "yearly": TruncYear}
+        period = request.query_params.get("period", "daily")
+        if period not in trunc_fn:
+            return Response({"detail": f"period must be one of {list(trunc_fn)}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = Order.objects.filter(status=Order.Status.PAID)
+        date_from = request.query_params.get("from")
+        date_to = request.query_params.get("to")
+        if date_from:
+            qs = qs.filter(created_at__date__gte=datetime.fromisoformat(date_from).date())
+        if date_to:
+            qs = qs.filter(created_at__date__lte=datetime.fromisoformat(date_to).date())
+
+        rows = (
+            qs.annotate(bucket=trunc_fn[period]("created_at"))
+            .values("bucket")
+            .annotate(gross_sales=Sum("amount"), order_count=Count("id"))
+            .order_by("bucket")
+        )
+        commission_rate = float(settings.PLATFORM_COMMISSION_RATE)
+
+        refund_rows = (
+            RefundRequest.objects.filter(status=RefundRequest.Status.COMPLETED)
+            .annotate(bucket=trunc_fn[period]("reviewed_at"))
+            .values("bucket")
+            .annotate(refunded_amount=Sum("amount"))
+        )
+        refund_by_bucket = {r["bucket"]: r["refunded_amount"] for r in refund_rows if r["bucket"]}
+
+        results = [
+            {
+                "period": row["bucket"].isoformat() if hasattr(row["bucket"], "isoformat") else str(row["bucket"]),
+                "gross_sales": row["gross_sales"],
+                "platform_commission": round(float(row["gross_sales"]) * commission_rate, 2),
+                "order_count": row["order_count"],
+                "refunded_amount": refund_by_bucket.get(row["bucket"], 0),
+            }
+            for row in rows
+        ]
+
+        return Response({
+            "period": period,
+            "results": results,
+            "totals": {
+                "gross_sales": sum(r["gross_sales"] for r in results),
+                "platform_commission": round(sum(r["platform_commission"] for r in results), 2),
+                "order_count": sum(r["order_count"] for r in results),
+                "refunded_amount": sum(float(r["refunded_amount"] or 0) for r in results),
+            },
+        })
+
+
+class FinancialReportExportView(APIView):
+    """GET /api/payments/reports/export/?period=... -- same data as
+    FinancialReportView, as a downloadable CSV (no new dependency --
+    Python's stdlib csv module, consistent with this project's
+    no-build-step, minimal-dependency frontend/backend philosophy)."""
+
+    permission_classes = [IsModeratorOrAbove]
+
+    def get(self, request):
+        import csv
+
+        from django.http import HttpResponse
+
+        report_view = FinancialReportView()
+        report_view.request = request
+        inner_response = report_view.get(request)
+        if inner_response.status_code != 200:
+            return inner_response
+        data = inner_response.data
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="wemix-financial-report-{data["period"]}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["Period", "Gross Sales", "Platform Commission", "Order Count", "Refunded Amount"])
+        for row in data["results"]:
+            writer.writerow([row["period"], row["gross_sales"], row["platform_commission"], row["order_count"], row["refunded_amount"]])
+        writer.writerow([])
+        writer.writerow(["TOTAL", data["totals"]["gross_sales"], data["totals"]["platform_commission"], data["totals"]["order_count"], data["totals"]["refunded_amount"]])
+        return response
+
+
+class FinancialReportPDFExportView(APIView):
+    """GET /api/payments/reports/export-pdf/?period=... -- same data as
+    FinancialReportView, as a printable one-page PDF summary (totals +
+    per-period table) for sharing with people who don't want a raw CSV."""
+
+    permission_classes = [IsModeratorOrAbove]
+
+    def get(self, request):
+        from io import BytesIO
+
+        from django.http import HttpResponse
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+
+        report_view = FinancialReportView()
+        report_view.request = request
+        inner_response = report_view.get(request)
+        if inner_response.status_code != 200:
+            return inner_response
+        data = inner_response.data
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm)
+        styles = getSampleStyleSheet()
+        elements = [
+            Paragraph("WEMIX -- Financial Report", styles["Title"]),
+            Paragraph(f"Period: {data['period'].capitalize()} &middot; Generated by {request.user.username}", styles["Normal"]),
+            Spacer(1, 10 * mm),
+        ]
+
+        totals = data["totals"]
+        totals_table = Table(
+            [
+                ["Gross Sales", "Platform Commission", "Orders", "Refunded"],
+                [
+                    f"{totals['gross_sales']:,.2f}", f"{totals['platform_commission']:,.2f}",
+                    str(totals["order_count"]), f"{totals['refunded_amount']:,.2f}",
+                ],
+            ],
+            colWidths=[45 * mm] * 4,
+        )
+        totals_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d1b3d")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(totals_table)
+        elements.append(Spacer(1, 10 * mm))
+
+        rows = [["Period", "Gross Sales", "Commission", "Orders", "Refunded"]]
+        for row in data["results"]:
+            rows.append([
+                row["period"], f"{row['gross_sales']:,.2f}", f"{row['platform_commission']:,.2f}",
+                str(row["order_count"]), f"{row['refunded_amount']:,.2f}",
+            ])
+        detail_table = Table(rows, colWidths=[35 * mm, 32 * mm, 32 * mm, 22 * mm, 32 * mm], repeatRows=1)
+        detail_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0eee8")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(detail_table)
+
+        doc.build(elements)
+        pdf_bytes = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="wemix-financial-report-{data["period"]}.pdf"'
+        return response

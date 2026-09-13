@@ -15,4 +15,7 @@ urlpatterns = [
     path("refunds/", views.RefundRequestCreateView.as_view(), name="refund-create"),
     path("refunds/queue/", views.RefundRequestQueueView.as_view(), name="refund-queue"),
     path("refunds/<uuid:pk>/review/", views.RefundRequestReviewView.as_view(), name="refund-review"),
+    path("reports/", views.FinancialReportView.as_view(), name="financial-report"),
+    path("reports/export/", views.FinancialReportExportView.as_view(), name="financial-report-export"),
+    path("reports/export-pdf/", views.FinancialReportPDFExportView.as_view(), name="financial-report-export-pdf"),
 ]

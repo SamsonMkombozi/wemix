@@ -4,9 +4,15 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AuditLog, Notification
+from .models import AuditLog, Notification, SupportTicket, TermsAcceptance
 from .permissions import IsAdminOrAbove, IsModeratorOrAbove
-from .serializers import AuditLogSerializer, NotificationSerializer
+from .serializers import (
+    AuditLogSerializer,
+    NotificationSerializer,
+    SupportTicketReplySerializer,
+    SupportTicketSerializer,
+    TermsAcceptanceSerializer,
+)
 
 
 class NotificationListView(generics.ListAPIView):
@@ -217,6 +223,71 @@ class IntegrationTestConnectionView(APIView):
         except Exception as exc:
             return {"success": False, "message": f"Could not connect/authenticate to {host}: {exc}"}
 
+
+
+class TermsStatusView(APIView):
+    """GET /api/terms/status/ -- the current terms version and whether
+    the logged-in user has accepted it yet (used to gate a re-accept
+    prompt after the text changes). Public GET (no auth) just returns
+    the current version, for display on a standalone terms page."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from django.conf import settings
+
+        data = {"current_version": settings.TERMS_VERSION}
+        if request.user.is_authenticated:
+            latest = TermsAcceptance.objects.filter(user=request.user).order_by("-created_at").first()
+            data["accepted_version"] = latest.version if latest else None
+            data["needs_acceptance"] = latest is None or latest.version != settings.TERMS_VERSION
+        return Response(data)
+
+
+class TermsAcceptView(generics.CreateAPIView):
+    """POST /api/terms/accept/ {"version": "..."} -- records (re-)acceptance,
+    e.g. when a logged-in user is prompted after the terms text changes."""
+
+    serializer_class = TermsAcceptanceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class SupportTicketListCreateView(generics.ListCreateAPIView):
+    """GET: my own tickets (or, for staff, everyone's -- see get_queryset).
+    POST: file a new one."""
+
+    serializer_class = SupportTicketSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = SupportTicket.objects.select_related("user").prefetch_related("messages")
+        is_staff = user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        if is_staff and self.request.query_params.get("all") == "1":
+            status_param = self.request.query_params.get("status")
+            if status_param:
+                qs = qs.filter(status=status_param)
+            return qs
+        return qs.filter(user=user)
+
+
+class SupportTicketReplyView(APIView):
+    """POST /api/support-tickets/<id>/reply/ -- the ticket's own user, or
+    any staff member, can post into the thread."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk=None):
+        ticket = get_object_or_404(SupportTicket, pk=pk)
+        user = request.user
+        is_staff = user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        if ticket.user_id != user.id and not is_staff:
+            return Response({"detail": "Not your ticket."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = SupportTicketReplySerializer(data=request.data, context={"ticket": ticket, "request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(SupportTicketSerializer(ticket).data)
 
 
 class AuditLogListView(generics.ListAPIView):

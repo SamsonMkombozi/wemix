@@ -15,4 +15,7 @@ urlpatterns = [
     path("payout-accounts/<uuid:pk>/", views.PayoutAccountDetailView.as_view(), name="payout-account-detail"),
     path("payout-accounts/<uuid:pk>/set-default/", views.PayoutAccountSetDefaultView.as_view(), name="payout-account-set-default"),
     path("payout-accounts/<uuid:pk>/review/", views.PayoutAccountReviewView.as_view(), name="payout-account-review"),
+    path("company/payout-accounts/", views.CompanyPayoutAccountListCreateView.as_view(), name="company-payout-accounts"),
+    path("company/withdrawals/", views.CompanyWithdrawalRequestListCreateView.as_view(), name="company-withdrawals"),
+    path("company/withdrawals/<uuid:pk>/review/", views.CompanyWithdrawalReviewView.as_view(), name="company-withdrawals-review"),
 ]

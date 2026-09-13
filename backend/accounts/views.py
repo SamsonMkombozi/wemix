@@ -9,12 +9,14 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.models import AuditLog
 from core.permissions import IsAdminOrAbove, IsModeratorOrAbove
 
-from .models import IdentityVerification, User
+from .models import CorporateVerification, IdentityVerification, User
 from .serializers import (
     AdminCreateUserSerializer,
     AdminSetPasswordSerializer,
     ChangePasswordSerializer,
     Confirm2FASerializer,
+    CorporateVerificationReviewSerializer,
+    CorporateVerificationSerializer,
     CustomTokenObtainPairSerializer,
     Disable2FASerializer,
     Enable2FASerializer,
@@ -189,6 +191,14 @@ class IdentityVerificationCreateListView(generics.ListCreateAPIView):
     def get_queryset(self):
         return IdentityVerification.objects.filter(user=self.request.user)
 
+    def get_throttles(self):
+        # Only the submission itself is rate-limited -- listing your own
+        # past submissions (GET) shouldn't share that tight bucket.
+        if self.request.method == "POST":
+            self.throttle_scope = "kyc_submit"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
 
 class IdentityVerificationReviewQueueView(generics.ListAPIView):
     """GET /api/accounts/kyc/queue/ -- moderator view of pending submissions."""
@@ -217,6 +227,48 @@ class IdentityVerificationReviewDetailView(generics.UpdateAPIView):
             target_model="IdentityVerification",
             target_id=instance.id,
             description=f"KYC {instance.status} for user {instance.user_id}.",
+            request=self.request,
+        )
+
+
+class CorporateVerificationCreateListView(generics.ListCreateAPIView):
+    """GET: list my own KYB submissions. POST: submit a new one -- lets a
+    buyer account represent an organization once approved (User.is_corporate)."""
+
+    serializer_class = CorporateVerificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return CorporateVerification.objects.filter(user=self.request.user)
+
+
+class CorporateVerificationReviewQueueView(generics.ListAPIView):
+    """GET /api/accounts/corporate-verifications/queue/ -- moderator queue."""
+
+    serializer_class = CorporateVerificationSerializer
+    permission_classes = [IsModeratorOrAbove]
+
+    def get_queryset(self):
+        return CorporateVerification.objects.filter(
+            status=CorporateVerification.Status.PENDING
+        ).select_related("user")
+
+
+class CorporateVerificationReviewDetailView(generics.UpdateAPIView):
+    """PATCH /api/accounts/corporate-verifications/<id>/review/"""
+
+    queryset = CorporateVerification.objects.all()
+    serializer_class = CorporateVerificationReviewSerializer
+    permission_classes = [IsModeratorOrAbove]
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        log_action(
+            actor=self.request.user,
+            action=AuditLog.Action.APPROVE if instance.status == CorporateVerification.Status.VERIFIED else AuditLog.Action.REJECT,
+            target_model="CorporateVerification",
+            target_id=instance.id,
+            description=f"Corporate verification {instance.status} for user {instance.user_id}.",
             request=self.request,
         )
 

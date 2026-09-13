@@ -1,6 +1,8 @@
+from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import PayoutAccount, Wallet, WalletTransaction, WithdrawalRequest
+from .models import CompanyPayoutAccount, CompanyWithdrawalRequest, PayoutAccount, Wallet, WalletTransaction, WithdrawalRequest
 
 
 class WalletTransactionSerializer(serializers.ModelSerializer):
@@ -16,13 +18,34 @@ class WalletSerializer(serializers.ModelSerializer):
 
 
 class PayoutAccountSerializer(serializers.ModelSerializer):
+    name_match_score = serializers.SerializerMethodField()
+
     class Meta:
         model = PayoutAccount
         fields = [
             "id", "account_type", "provider", "account_number", "account_name",
-            "is_default", "status", "rejection_reason", "created_at",
+            "is_default", "status", "rejection_reason", "name_match_score", "created_at",
         ]
-        read_only_fields = ["id", "status", "rejection_reason", "created_at"]
+        read_only_fields = ["id", "status", "rejection_reason", "name_match_score", "created_at"]
+
+    def get_name_match_score(self, obj):
+        """0-100 fuzzy match between this payout account's declared name
+        and the user's OCR'd KYC name -- a low score doesn't block review
+        (OCR isn't perfect, married names/nicknames are legitimate), but
+        surfaces a mismatch warning so a moderator doesn't have to eyeball
+        it manually on every single review."""
+        import difflib
+
+        from accounts.models import IdentityVerification
+
+        verified_kyc = IdentityVerification.objects.filter(
+            user_id=obj.user_id, status=IdentityVerification.Status.VERIFIED,
+        ).order_by("-reviewed_at").first()
+        if not verified_kyc or not verified_kyc.ocr_full_name:
+            return None
+        a = obj.account_name.strip().lower()
+        b = verified_kyc.ocr_full_name.strip().lower()
+        return round(difflib.SequenceMatcher(None, a, b).ratio() * 100)
 
     def create(self, validated_data):
         user = self.context["request"].user
@@ -74,11 +97,12 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
             "status",
             "rejection_reason",
             "payout_reference",
+            "risk_flagged",
             "created_at",
         ]
         read_only_fields = [
             "id", "destination_type", "destination_details", "status",
-            "rejection_reason", "payout_reference", "created_at",
+            "rejection_reason", "payout_reference", "risk_flagged", "created_at",
         ]
 
     def get_payout_account_display(self, obj):
@@ -89,12 +113,45 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
         return ""
 
     def validate_amount(self, value):
+        from datetime import timedelta
+
         wallet = self.context["wallet"]
         if value <= 0:
             raise serializers.ValidationError("Withdrawal amount must be positive.")
         if value > wallet.balance:
             raise serializers.ValidationError("Withdrawal amount exceeds available wallet balance.")
+
+        # Velocity limits: sum this wallet's non-rejected/failed withdrawals
+        # over the trailing day/week/month, including this new one, against
+        # the configured caps. Pending requests count too (not just
+        # completed ones) so a burst of unreviewed requests can't bypass
+        # the limit while waiting in the queue.
+        now = timezone.now()
+        active_statuses = [
+            WithdrawalRequest.Status.REQUESTED, WithdrawalRequest.Status.APPROVED,
+            WithdrawalRequest.Status.PROCESSING, WithdrawalRequest.Status.COMPLETED,
+        ]
+        windows = [
+            (timedelta(days=1), settings.WITHDRAWAL_DAILY_LIMIT, "24 hours"),
+            (timedelta(days=7), settings.WITHDRAWAL_WEEKLY_LIMIT, "7 days"),
+            (timedelta(days=30), settings.WITHDRAWAL_MONTHLY_LIMIT, "30 days"),
+        ]
+        for window, limit, label in windows:
+            from django.db.models import Sum
+
+            existing = WithdrawalRequest.objects.filter(
+                wallet=wallet, status__in=active_statuses, created_at__gte=now - window,
+            ).aggregate(total=Sum("amount"))["total"] or 0
+            if existing + value > limit:
+                raise serializers.ValidationError(
+                    f"This would exceed the {label} withdrawal limit "
+                    f"({existing} already requested/paid + {value} > {limit} limit)."
+                )
         return value
+
+    def validate(self, attrs):
+        attrs["risk_flagged"] = attrs.get("amount", 0) >= settings.WITHDRAWAL_RISK_FLAG_THRESHOLD
+        return attrs
 
     def validate_payout_account(self, account):
         user = self.context["request"].user
@@ -170,5 +227,92 @@ class WithdrawalReviewSerializer(serializers.Serializer):
                     message=withdrawal.rejection_reason or "Contact support for details.",
                     link_path="dashboard.html?tab=withdrawals",
                 )
+
+        return withdrawal
+
+
+class CompanyPayoutAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyPayoutAccount
+        fields = ["id", "account_type", "provider", "account_number", "account_name", "is_active", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def create(self, validated_data):
+        return CompanyPayoutAccount.objects.create(added_by=self.context["request"].user, **validated_data)
+
+
+class CompanyWithdrawalRequestSerializer(serializers.ModelSerializer):
+    payout_account_display = serializers.SerializerMethodField()
+    requested_by_username = serializers.CharField(source="requested_by.username", read_only=True, default="")
+
+    class Meta:
+        model = CompanyWithdrawalRequest
+        fields = [
+            "id", "payout_account", "payout_account_display", "amount", "reason",
+            "requested_by_username", "status", "approved_at", "payout_reference",
+            "rejection_reason", "created_at",
+        ]
+        read_only_fields = [
+            "id", "status", "approved_at", "payout_reference", "rejection_reason", "created_at",
+        ]
+
+    def get_payout_account_display(self, obj):
+        return f"{obj.payout_account.get_account_type_display()} ({obj.payout_account.account_number})"
+
+    def validate_payout_account(self, account):
+        if not account.is_active:
+            raise serializers.ValidationError("This company payout account is inactive.")
+        return account
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Amount must be positive.")
+        return value
+
+    def create(self, validated_data):
+        return CompanyWithdrawalRequest.objects.create(
+            requested_by=self.context["request"].user, **validated_data
+        )
+
+
+class CompanyWithdrawalReviewSerializer(serializers.Serializer):
+    """Super-admin-only approve/reject/complete. Kept as a single-step
+    action (like the seller WithdrawalReviewSerializer) rather than a
+    literal multi-signature workflow -- the 'only company owners may
+    approve' requirement is enforced by gating this view to IsSuperAdmin,
+    not by requiring N separate approvals."""
+
+    STATUS_CHOICES = ["approved", "completed", "rejected"]
+    status = serializers.ChoiceField(choices=STATUS_CHOICES)
+    rejection_reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    payout_reference = serializers.CharField(required=False, allow_blank=True, max_length=100)
+
+    def validate(self, attrs):
+        if attrs["status"] == "rejected" and not attrs.get("rejection_reason"):
+            raise serializers.ValidationError({"rejection_reason": "Required when rejecting a withdrawal."})
+        return attrs
+
+    def save(self, **kwargs):
+        from django.utils import timezone
+
+        from .services import debit_platform_wallet_for_company_withdrawal
+
+        withdrawal = self.context["withdrawal"]
+        approver = self.context["request"].user
+        new_status = self.validated_data["status"]
+        already_completed = withdrawal.status == CompanyWithdrawalRequest.Status.COMPLETED
+
+        withdrawal.status = new_status
+        withdrawal.approved_by = approver
+        withdrawal.approved_at = timezone.now()
+        withdrawal.rejection_reason = self.validated_data.get("rejection_reason", withdrawal.rejection_reason)
+        if self.validated_data.get("payout_reference"):
+            withdrawal.payout_reference = self.validated_data["payout_reference"]
+        withdrawal.save(update_fields=[
+            "status", "approved_by", "approved_at", "rejection_reason", "payout_reference", "updated_at",
+        ])
+
+        if new_status == "completed" and not already_completed:
+            debit_platform_wallet_for_company_withdrawal(withdrawal)
 
         return withdrawal

@@ -135,6 +135,87 @@ class IntegrationCredential(BaseModel):
         return f"{self.provider}.{self.field_name}"
 
 
+class TermsAcceptance(BaseModel):
+    """Records that a user explicitly accepted a specific version of the
+    Terms & Conditions -- one row per acceptance event, so re-accepting a
+    later version (after the text changes) doesn't overwrite the history
+    of what the user agreed to and when. `created_at` (from BaseModel) is
+    the acceptance timestamp."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="terms_acceptances"
+    )
+    version = models.CharField(max_length=20, help_text="Matches settings.TERMS_VERSION at acceptance time.")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "version"])]
+
+    def __str__(self):
+        return f"{self.user_id} accepted terms v{self.version} @ {self.created_at:%Y-%m-%d}"
+
+
+class SupportTicket(BaseModel):
+    """A buyer/seller-initiated support request, distinct from a refund
+    request (payments.RefundRequest, money-specific) and from
+    moderation.UserReport (reporting someone else's misconduct) -- this
+    is 'I have a question/complaint/compliment about my own experience
+    and want to track a reply', the standard help-desk pattern."""
+
+    class Category(models.TextChoices):
+        COMPLAINT = "complaint", "Complaint"
+        REFUND_HELP = "refund_help", "Refund help"
+        COMPLIMENT = "compliment", "Compliment"
+        QUESTION = "question", "Question"
+        OTHER = "other", "Other"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_PROGRESS = "in_progress", "In progress"
+        RESOLVED = "resolved", "Resolved"
+        CLOSED = "closed", "Closed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="support_tickets"
+    )
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.QUESTION)
+    subject = models.CharField(max_length=255)
+    message = models.TextField()
+    # No FK to Order/NewsListing -- core must stay decoupled from payments/news
+    # at the DB-constraint level (same reasoning as ModerationQueueItem's
+    # related_object_id). Optional context only, resolved client-side.
+    related_order_id = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=15, choices=Status.choices, default=Status.OPEN, db_index=True)
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assigned_support_tickets",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "-created_at"]), models.Index(fields=["user"])]
+
+    def __str__(self):
+        return f"[{self.get_category_display()}] {self.subject} ({self.user_id})"
+
+
+class SupportTicketMessage(BaseModel):
+    """One message in a ticket's reply thread -- the buyer's original
+    message lives on SupportTicket.message itself, this is every
+    follow-up (staff reply or the user adding detail)."""
+
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name="messages")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    message = models.TextField()
+    is_staff_reply = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["created_at"]
+
+
 class Notification(BaseModel):
     """
     An in-app (and optionally emailed) notification for a user about
@@ -158,6 +239,7 @@ class Notification(BaseModel):
         REFUND_PROCESSED = "refund_processed", "Refund processed"
         MODERATION_ACTION = "moderation_action", "Moderation action taken"
         NEW_REVIEW = "new_review", "New review received"
+        SUPPORT_TICKET_REPLY = "support_ticket_reply", "Support ticket reply"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"

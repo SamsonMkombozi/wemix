@@ -1,10 +1,11 @@
 import pyotp
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import IdentityVerification, User
+from .models import CorporateVerification, IdentityVerification, User
 
 # Roles a person can self-select at signup. Staff-side roles (moderator,
 # admin, super_admin) are never assignable through the public API — those
@@ -16,6 +17,10 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, style={"input_type": "password"})
     password_confirm = serializers.CharField(write_only=True, style={"input_type": "password"})
     role = serializers.ChoiceField(choices=[(r.value, r.label) for r in SELF_ASSIGNABLE_ROLES], default=User.Role.BUYER)
+    journalist_tier = serializers.ChoiceField(
+        choices=[(t.value, t.label) for t in User.JournalistTier], required=False, default=User.JournalistTier.NONE,
+    )
+    terms_accepted = serializers.BooleanField(write_only=True)
 
     class Meta:
         model = User
@@ -29,7 +34,14 @@ class RegisterSerializer(serializers.ModelSerializer):
             "phone_number",
             "role",
             "organization_name",
+            "journalist_tier",
+            "terms_accepted",
         ]
+
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError("You must accept the Terms & Conditions to create an account.")
+        return value
 
     def validate(self, attrs):
         if attrs["password"] != attrs.pop("password_confirm"):
@@ -39,13 +51,28 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"organization_name": "Organization name is required for a media house account."}
             )
+        if attrs.get("journalist_tier") and attrs["journalist_tier"] != User.JournalistTier.NONE and attrs.get("role") not in {
+            User.Role.JOURNALIST, User.Role.MEDIA_HOUSE,
+        }:
+            raise serializers.ValidationError(
+                {"journalist_tier": "Only journalist/media house accounts can set a journalist tier."}
+            )
         return attrs
 
     def create(self, validated_data):
+        from core.models import TermsAcceptance
+
+        validated_data.pop("terms_accepted")
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
         user.save()
+
+        request = self.context.get("request")
+        TermsAcceptance.objects.create(
+            user=user, version=settings.TERMS_VERSION,
+            ip_address=request.META.get("REMOTE_ADDR") if request else None,
+        )
         return user
 
 
@@ -76,6 +103,9 @@ class UserSerializer(serializers.ModelSerializer):
             "is_phone_verified",
             "is_2fa_enabled",
             "trust_score",
+            "journalist_tier",
+            "is_press_credentialed",
+            "is_corporate",
             "date_joined",
         ]
         read_only_fields = [
@@ -88,6 +118,9 @@ class UserSerializer(serializers.ModelSerializer):
             "is_phone_verified",
             "is_2fa_enabled",
             "trust_score",
+            "journalist_tier",
+            "is_press_credentialed",
+            "is_corporate",
             "date_joined",
         ]
 
@@ -116,6 +149,7 @@ class ModeratorUserSerializer(serializers.ModelSerializer):
             "id_verification_status", "is_email_verified", "is_phone_verified",
             "trust_score", "is_banned", "is_suspended", "suspended_until",
             "is_deleted", "deleted_at", "is_active", "date_joined",
+            "journalist_tier", "is_press_credentialed", "is_corporate",
         ]
         read_only_fields = fields
 
@@ -203,6 +237,7 @@ class IdentityVerificationSerializer(serializers.ModelSerializer):
             "front_image",
             "back_image",
             "selfie_image",
+            "press_credential_image",
             "status",
             "rejection_reason",
             "ocr_full_name",
@@ -266,7 +301,13 @@ class IdentityVerificationReviewSerializer(serializers.ModelSerializer):
             if instance.status == IdentityVerification.Status.VERIFIED
             else User.VerificationStatus.REJECTED
         )
-        User.objects.filter(pk=instance.user_id).update(id_verification_status=new_user_status)
+        user_updates = {"id_verification_status": new_user_status}
+        # A press credential attached to an approved submission confirms
+        # the journalist_tier='professional' claim made at registration --
+        # doesn't need its own separate review action.
+        if instance.status == IdentityVerification.Status.VERIFIED and instance.press_credential_image:
+            user_updates["is_press_credentialed"] = True
+        User.objects.filter(pk=instance.user_id).update(**user_updates)
 
         from core.models import Notification
         from core.notifications import send_notification
@@ -337,6 +378,46 @@ class Disable2FASerializer(serializers.Serializer):
         user.totp_secret = ""
         user.save(update_fields=["is_2fa_enabled", "totp_secret"])
         return user
+
+
+class CorporateVerificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CorporateVerification
+        fields = [
+            "id", "company_name", "business_license", "company_registration", "tax_document",
+            "status", "rejection_reason", "created_at",
+        ]
+        read_only_fields = ["id", "status", "rejection_reason", "created_at"]
+
+    def create(self, validated_data):
+        return CorporateVerification.objects.create(user=self.context["request"].user, **validated_data)
+
+
+class CorporateVerificationReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CorporateVerification
+        fields = ["status", "rejection_reason"]
+
+    def validate_status(self, value):
+        allowed = {CorporateVerification.Status.VERIFIED, CorporateVerification.Status.REJECTED}
+        if value not in allowed:
+            raise serializers.ValidationError("Review outcome must be 'verified' or 'rejected'.")
+        return value
+
+    def update(self, instance, validated_data):
+        from django.utils import timezone
+
+        request = self.context["request"]
+        instance.status = validated_data["status"]
+        instance.rejection_reason = validated_data.get("rejection_reason", "")
+        instance.reviewed_by = request.user
+        instance.reviewed_at = timezone.now()
+        instance.save(update_fields=["status", "rejection_reason", "reviewed_by", "reviewed_at", "updated_at"])
+
+        User.objects.filter(pk=instance.user_id).update(
+            is_corporate=(instance.status == CorporateVerification.Status.VERIFIED)
+        )
+        return instance
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

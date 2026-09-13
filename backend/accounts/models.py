@@ -92,6 +92,29 @@ class User(AbstractUser):
                    "notable/trusted publisher'. Moderator/admin-set only, never seller-settable.",
     )
 
+    class JournalistTier(models.TextChoices):
+        NONE = "none", "Not applicable"
+        CITIZEN = "citizen", "Citizen Journalist"
+        PROFESSIONAL = "professional", "Professional Journalist"
+
+    journalist_tier = models.CharField(
+        max_length=20, choices=JournalistTier.choices, default=JournalistTier.NONE, blank=True,
+        help_text="Self-declared at registration for journalist/media_house accounts; the "
+                   "is_press_credentialed flag below is the moderator-verified confirmation of it.",
+    )
+    is_press_credentialed = models.BooleanField(
+        default=False,
+        help_text="Moderator-verified press credential (press card / media house letter), reviewed "
+                   "via the press_credential_image on the user's IdentityVerification submission. "
+                   "Distinct from is_verified_badge, which is a broader editorial trust signal.",
+    )
+    is_corporate = models.BooleanField(
+        default=False,
+        help_text="True once a CorporateVerification (business license / company registration / tax "
+                   "document) has been approved -- lets a buyer account represent an organization "
+                   "rather than an individual.",
+    )
+
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
 
@@ -146,6 +169,12 @@ class IdentityVerification(BaseModel):
     front_image = models.ImageField(upload_to=national_id_upload_path)
     back_image = models.ImageField(upload_to=national_id_upload_path, blank=True, null=True)
     selfie_image = models.ImageField(upload_to=national_id_upload_path)
+    press_credential_image = models.ImageField(
+        upload_to=national_id_upload_path, blank=True, null=True,
+        help_text="Optional: press card or media house accreditation letter, for journalist_tier="
+                   "'professional' claims. Reviewed alongside the rest of this submission; approving it "
+                   "sets User.is_press_credentialed rather than id_verification_status.",
+    )
 
     # OCR extraction results
     ocr_full_name = models.CharField(max_length=255, blank=True)
@@ -182,6 +211,42 @@ class TwoFactorRecoveryCode(BaseModel):
 
     class Meta:
         indexes = [models.Index(fields=["user", "used_at"])]
+
+
+def corporate_doc_upload_path(instance, filename):
+    return f"corporate/{instance.user_id}/{uuid.uuid4()}_{filename}"
+
+
+class CorporateVerification(BaseModel):
+    """KYB (know-your-business) submission for a buyer account acting on
+    behalf of an organization rather than as an individual -- mirrors
+    IdentityVerification's submit/review pattern but with business
+    documents instead of a national ID."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        VERIFIED = "verified", "Verified"
+        REJECTED = "rejected", "Rejected"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="corporate_verifications")
+    company_name = models.CharField(max_length=255)
+    business_license = models.FileField(upload_to=corporate_doc_upload_path)
+    company_registration = models.FileField(upload_to=corporate_doc_upload_path)
+    tax_document = models.FileField(upload_to=corporate_doc_upload_path, blank=True, null=True)
+
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    reviewed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_corporate_verifications"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "status"])]
+
+    def __str__(self):
+        return f"Corporate verification for {self.company_name} ({self.user_id}) [{self.status}]"
 
 
 class LoginSession(TimeStampedModel):

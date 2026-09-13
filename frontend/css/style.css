@@ -1,21 +1,27 @@
 /* ==========================================================================
-   Habari Platform — design tokens
-   Brief: pure white bg, black text, gold accent, white cards w/ thin gold
-   borders, black buttons w/ gold text (invert on hover), Poppins,
-   Bloomberg + Reuters + Forbes + modern SaaS marketplace feel.
+   WEMIX / Habari Platform — design tokens
+   Unified onto the WEMIX editorial identity (navy/blue/red) that already
+   lives on index.html and in the shared header logo (js/nav.js), rather
+   than the older black/gold placeholder this file originally shipped
+   with -- one brand across every screen instead of two competing ones.
+   Custom property NAMES are kept as-is (--color-gold, --color-black, ...)
+   since every component references them by name; only their VALUES and,
+   where a component paired "gold background + black text" in a way that
+   doesn't hold at the new hues, the specific text-color rule change.
+   Poppins stays throughout -- it was already index.html's typeface too.
    ========================================================================== */
 
 :root {
   --color-bg: #ffffff;
-  --color-text: #0a0a0a;
-  --color-text-muted: #5c5c5c;
-  --color-gold: #d4af37;
-  --color-gold-secondary: #c9a227;
-  --color-gold-dark: #a67c00;
-  --color-black: #0a0a0a;
-  --color-border: #e8e2d0;
+  --color-text: #14141f;
+  --color-text-muted: #6b7280;
+  --color-gold: #2f6fed;           /* primary accent (was bright gold) -- WEMIX blue */
+  --color-gold-secondary: #e63946; /* energetic/hover accent -- WEMIX red */
+  --color-gold-dark: #1d4ed8;      /* deep accent for text-on-white (links, eyebrows, focus labels) */
+  --color-black: #0d1b3d;          /* primary dark surface -- WEMIX navy (was pure black) */
+  --color-border: #e7e9f0;
   --color-card-bg: #ffffff;
-  --color-danger: #b3261e;
+  --color-danger: #e63946;         /* aligned to the one WEMIX red -- also used for breaking/live */
   --color-success: #1e6b3c;
 
   --font-display: 'Poppins', sans-serif;
@@ -201,17 +207,21 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   gap: 8px;
   border: 1px solid var(--color-black);
   background: var(--color-black);
-  color: var(--color-gold);
+  color: #ffffff;
   padding: 11px 22px;
   border-radius: var(--radius-sm);
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 0.88rem;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, transform 0.1s;
+  transition: background 0.15s, color 0.15s, transform 0.1s, border-color 0.15s;
 }
 
-.btn:hover { background: var(--color-gold); color: var(--color-black); border-color: var(--color-gold); }
+/* Hover energizes to the red accent (matching WEMIX's own "Watch Live"
+   treatment) rather than inverting to a light fill -- white text stays
+   legible against both the navy default and the red hover state, so
+   there's no contrast recalculation needed on interaction. */
+.btn:hover { background: var(--color-gold-secondary); color: #ffffff; border-color: var(--color-gold-secondary); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -220,7 +230,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   color: var(--color-black);
   border: 1px solid var(--color-black);
 }
-.btn-outline:hover { background: var(--color-black); color: var(--color-gold); }
+.btn-outline:hover { background: var(--color-black); color: #ffffff; }
 
 .btn-ghost {
   background: transparent;
@@ -315,7 +325,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 
 .ticker {
   background: var(--color-black);
-  color: var(--color-gold);
+  color: #ffffff;
   overflow: hidden;
   white-space: nowrap;
   padding: 9px 0;
@@ -336,7 +346,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 
 .ticker-track span::before {
   content: '\25CF';
-  color: var(--color-gold-dark);
+  color: var(--color-gold-secondary);
   margin-right: 10px;
   font-size: 0.55rem;
   vertical-align: middle;
@@ -423,6 +433,167 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 .filters-bar input[type="text"] { flex: 1; min-width: 200px; }
 
 /* ---------------------------------------------------------------------- */
+/* Auth pages (login / register) -- deliberately NOT the site-wide topnav.
+   A logged-out visitor on a sign-in screen gets no value from marketplace/
+   dashboard/notification icons that don't apply yet, and the old layout
+   showed the full nav bar just to display a single redundant "Log in"
+   button on the login page itself. Split-screen instead: an editorial
+   brand panel (hidden below 900px) plus a focused, minimal form column
+   with just a wordmark and a way back out -- no header chrome at all.  */
+/* ---------------------------------------------------------------------- */
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* Grid/flex items default to min-width:auto, which refuses to shrink
+   below the content's intrinsic min size -- the same overflow trap
+   .dash-grid > * already guards against elsewhere in this file. Without
+   this, the form column (and everything inside it) forces the whole
+   page wider than the viewport on narrow screens instead of shrinking. */
+.auth-page > * { min-width: 0; }
+.auth-form-center, .auth-form-card { min-width: 0; }
+
+.auth-panel-brand {
+  background: linear-gradient(155deg, var(--color-black) 0%, #16265a 60%, #1d2f66 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 48px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* A quiet dot-grid texture -- decorative only, never competes with the
+   foreground content, and respects prefers-reduced-motion by simply
+   having no motion to begin with. */
+.auth-panel-brand::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1.5px, transparent 1.5px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(circle at 30% 20%, black, transparent 70%);
+  pointer-events: none;
+}
+
+.auth-panel-wordmark {
+  position: relative;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.auth-panel-wordmark span { color: var(--color-gold); }
+
+.auth-panel-content { position: relative; max-width: 420px; }
+
+.auth-panel-eyebrow {
+  display: inline-block;
+  color: var(--color-gold-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.auth-panel-content h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 1.2rem + 1.8vw, 2.3rem);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 14px 0;
+  color: #fff;
+}
+
+.auth-panel-content p {
+  color: #c7cfe8;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.auth-panel-points {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.auth-panel-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.86rem;
+  color: #dbe1f3;
+}
+
+.auth-panel-points li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  margin-top: 7px;
+  flex-shrink: 0;
+}
+
+.auth-panel-foot {
+  position: relative;
+  font-size: 0.75rem;
+  color: #8b96bd;
+}
+
+.auth-form-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.auth-form-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 24px 40px 0;
+}
+
+.auth-form-topbar img { height: 34px; display: block; }
+.auth-form-topbar a.auth-back-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.auth-form-topbar a.auth-back-link:hover { color: var(--color-text); }
+
+.auth-form-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+}
+
+.auth-form-card { width: 100%; max-width: 400px; }
+.auth-form-card h2 { margin-bottom: 4px; }
+
+@media (max-width: 900px) {
+  .auth-page { grid-template-columns: 1fr; }
+  .auth-panel-brand { display: none; }
+  .auth-form-topbar { padding: 20px 20px 0; }
+}
+
+/* ---------------------------------------------------------------------- */
 /* Forms                                                                  */
 /* ---------------------------------------------------------------------- */
 
@@ -485,7 +656,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 
 .alert-error { background: #fbeceb; color: var(--color-danger); border-color: #f3cfcc; }
 .alert-success { background: #eaf5ee; color: var(--color-success); border-color: #cdeadb; }
-.alert-info { background: #fdf8ec; color: var(--color-gold-dark); border-color: #f2e3ba; }
+.alert-info { background: #e9f1fb; color: var(--color-gold-dark); border-color: #cfe0f7; }
 
 .pill {
   display: inline-block;
@@ -498,10 +669,13 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 }
 
 .pill-verified { background: #eaf5ee; color: var(--color-success); }
-.pill-pending { background: #fdf8ec; color: var(--color-gold-dark); }
+.pill-pending { background: #e9f1fb; color: var(--color-gold-dark); }
 .pill-rejected { background: #fbeceb; color: var(--color-danger); }
 
-.rating-summary { color: var(--color-gold-dark); font-size: 0.95rem; }
+/* Deliberately NOT the brand accent -- star ratings are a near-universal
+   amber convention (Amazon/Google/Yelp/...) that users read at a glance;
+   decoupling this from the brand palette keeps that recognizable. */
+.rating-summary { color: #d4a017; font-size: 0.95rem; }
 .rating-summary strong { color: var(--color-text); }
 
 /* ---------------------------------------------------------------------- */
@@ -525,7 +699,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   top: -2px;
   right: -2px;
   background: var(--color-gold);
-  color: var(--color-black);
+  color: #ffffff;
   border-radius: 999px;
   font-size: 0.62rem;
   font-weight: 700;
@@ -570,10 +744,10 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   transition: background 0.12s;
 }
 
-.notif-item:hover { background: #faf8f2; }
+.notif-item:hover { background: #f4f6fb; }
 .notif-item:last-child { border-bottom: none; }
 
-.notif-unread { background: #fdf8ec; }
+.notif-unread { background: #e9f1fb; }
 .notif-unread:hover { background: #fbf1d9; }
 
 .notif-item-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 2px; }
@@ -617,7 +791,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   height: 34px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: var(--color-black);
+  color: #ffffff;
   border: none;
   font-weight: 700;
   font-size: 0.9rem;
@@ -658,7 +832,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--color-border);
-  background: #faf8f2;
+  background: #f4f6fb;
 }
 
 .avatar-circle-lg {
@@ -667,7 +841,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   min-width: 42px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: var(--color-black);
+  color: #ffffff;
   font-weight: 700;
   font-size: 1.05rem;
   display: flex;
@@ -698,7 +872,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   transition: background 0.12s;
 }
 
-.avatar-menu-item:hover { background: #faf8f2; }
+.avatar-menu-item:hover { background: #f4f6fb; }
 .avatar-menu-item-danger { color: var(--color-danger); }
 .avatar-menu-item-danger:hover { background: #fbecec; }
 
@@ -782,7 +956,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 }
 
 .sub-tab.active {
-  color: var(--color-black);
+  color: #ffffff;
   background: var(--color-gold);
 }
 
@@ -1099,7 +1273,7 @@ footer {
   min-width: 44px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: var(--color-black);
+  color: #ffffff;
   font-weight: 700;
   font-size: 1.1rem;
   display: flex;

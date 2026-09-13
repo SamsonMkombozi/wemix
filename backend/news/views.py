@@ -11,6 +11,7 @@ from core.models import AuditLog
 from core.permissions import IsAdminOrAbove, IsListingOwner, IsModeratorOrAbove, IsVerifiedSeller
 
 from .models import AIVerificationResult, Bookmark, Category, Follow, ListingView, NewsListing, NewsMedia, Tag
+from .services import MEDIA_DOWNLOAD_TOKEN_MAX_AGE, make_media_download_token
 from .serializers import (
     AIVerificationResultSerializer,
     BookmarkedListingSerializer,
@@ -68,9 +69,9 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             if self.request.method == "GET":
                 return [permissions.AllowAny()]
             return [permissions.IsAuthenticated()]
-        if self.action == "moderate":
+        if self.action in {"moderate", "delete_permanently"}:
             return [IsModeratorOrAbove()]
-        if self.action == "bookmark":
+        if self.action in {"bookmark", "social_share"}:
             return [permissions.IsAuthenticated()]
         if self.action == "follow_seller":
             return [permissions.IsAuthenticated()]
@@ -240,14 +241,37 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         )
 
     def perform_update(self, serializer):
-        listing = serializer.save()
+        from .models import NewsListingRevision
         from .services import log_news_action
+
+        original = serializer.instance
+        was_published = original.status == NewsListing.ListingStatus.PUBLISHED
+        tracked_fields = ["title", "description", "body", "byline", "dateline", "location"]
+        snapshot = {f: getattr(original, f) for f in tracked_fields}
+        snapshot["price"] = str(original.price)
+
+        listing = serializer.save()
+
+        NewsListingRevision.objects.create(listing=listing, edited_by=self.request.user, snapshot=snapshot)
+
+        content_changed = any(snapshot[f] != getattr(listing, f) for f in tracked_fields) or snapshot["price"] != str(listing.price)
+
+        description = "Listing updated."
+        if was_published and content_changed:
+            # A seller correcting a typo shouldn't be able to silently
+            # change a listing's actual content after it already passed
+            # verification and started selling -- pull it back to pending
+            # re-review, same as the media-upload flagging path does.
+            listing.status = NewsListing.ListingStatus.SUBMITTED
+            listing.verification_status = NewsListing.VerificationStatus.PENDING
+            listing.save(update_fields=["status", "verification_status", "updated_at"])
+            description = "Listing edited after publishing; pulled back to pending re-review."
 
         log_news_action(
             actor=self.request.user,
             action=AuditLog.Action.UPDATE,
             listing=listing,
-            description="Listing updated; verification reset to pending.",
+            description=description,
             request=self.request,
         )
 
@@ -344,6 +368,69 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         results = listing.ai_verifications.order_by("-created_at")
         return Response(AIVerificationResultSerializer(results, many=True).data)
 
+    @action(detail=True, methods=["get"])
+    def revisions(self, request, slug=None):
+        """GET /api/news/listings/<slug>/revisions/ -- owner/staff only.
+        IsListingOwner (this viewset's default permission) allows any
+        authenticated user through on GET (safe methods bypass its
+        owner check, since that's correct for viewing a public listing) --
+        revision history is not public, so it's checked explicitly here.
+        """
+        listing = self.get_object()
+        user = request.user
+        is_owner_or_staff = listing.seller_id == user.id or (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        if not is_owner_or_staff:
+            return Response({"detail": "Not your listing."}, status=status.HTTP_403_FORBIDDEN)
+
+        results = listing.revisions.select_related("edited_by").order_by("-created_at")
+        return Response([
+            {
+                "id": str(r.id),
+                "edited_by": r.edited_by.username if r.edited_by else "",
+                "snapshot": r.snapshot,
+                "created_at": r.created_at,
+            }
+            for r in results
+        ])
+
+    @action(detail=True, methods=["get"], url_path="download/(?P<media_id>[^/.]+)")
+    def download(self, request, slug=None, media_id=None):
+        """GET /api/news/listings/<slug>/download/<media_id>/ -- verifies
+        the requester has actually paid for this listing (or is the
+        seller/staff), then hands back a signed, short-lived download URL
+        rather than streaming the file directly from this authenticated
+        endpoint. The actual bytes are served by MediaDownloadByTokenView
+        below, a public (no-auth-header) endpoint that only a valid,
+        unexpired signature can unlock -- the standard presigned-URL
+        pattern, so the link also works if handed to e.g. a <video> tag
+        or opened directly rather than only via an authenticated fetch.
+        """
+        from payments.models import Order
+
+        listing = self.get_object()
+        media_obj = get_object_or_404(NewsMedia, pk=media_id, listing=listing)
+
+        user = request.user
+        is_owner_or_staff = listing.seller_id == user.id or (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        has_paid = Order.objects.filter(buyer=user, listing=listing, status=Order.Status.PAID).exists()
+        if not (is_owner_or_staff or has_paid):
+            return Response(
+                {"detail": "You need to purchase this listing before downloading its original media."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not media_obj.file:
+            from django.http import Http404
+            raise Http404("No file attached to this media item.")
+
+        token = make_media_download_token(media_obj.id)
+        download_url = request.build_absolute_uri(f"/api/news/media-download/{token}/")
+        return Response({"download_url": download_url, "expires_in": MEDIA_DOWNLOAD_TOKEN_MAX_AGE})
+
     @action(detail=True, methods=["post"])
     def moderate(self, request, slug=None):
         """Manual moderator approve/reject -- distinct from the automatic
@@ -361,6 +448,126 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             request=request,
         )
         return Response(NewsListingDetailSerializer(listing, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="delete-permanently")
+    def delete_permanently(self, request, slug=None):
+        """POST /api/news/listings/<slug>/delete-permanently/ -- hard-delete
+        a listing, distinct from the soft REMOVED status that DELETE/reject
+        already produce. Refused if any buyer has a paid order against this
+        listing (they've already paid for access to it; deleting the row
+        would orphan that purchase) -- suspend/reject is the correct tool
+        in that case, not a hard delete. Requires a `reason` in the body
+        and always writes an AuditLog entry, since this is irreversible.
+        """
+        from django.db.models import ProtectedError
+
+        from payments.models import Order
+
+        listing = self.get_object()
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"detail": "A reason is required to permanently delete a listing."}, status=status.HTTP_400_BAD_REQUEST)
+
+        order_count = Order.objects.filter(listing=listing).count()
+        paid_order_count = Order.objects.filter(listing=listing, status=Order.Status.PAID).count()
+        if paid_order_count:
+            return Response(
+                {
+                    "detail": f"Cannot permanently delete: {paid_order_count} buyer(s) already paid for "
+                              f"this listing and have access to it. Use Reject or Suspend instead to keep "
+                              f"their purchase history intact.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order_count:
+            return Response(
+                {
+                    "detail": f"Cannot permanently delete: {order_count} order record(s) (e.g. failed/"
+                              f"cancelled payment attempts) reference this listing and must be kept for "
+                              f"financial history. Use Reject or Suspend instead.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .services import log_news_action
+
+        listing_id, title = listing.id, listing.title
+        log_news_action(
+            actor=request.user, action=AuditLog.Action.DELETE, listing=listing,
+            description=f"Listing '{title}' permanently deleted by moderator. Reason: {reason}",
+            request=request,
+        )
+        try:
+            listing.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "Cannot permanently delete: other records still reference this listing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"detail": f"Listing '{title}' permanently deleted.", "id": str(listing_id)})
+
+    @action(detail=True, methods=["post"], url_path="social-share")
+    def social_share(self, request, slug=None):
+        """POST /api/news/listings/<slug>/social-share/ {"provider": "..."}
+        -- purchase-gated (or owner/staff). For providers with a real,
+        unauthenticated web share-intent URL (facebook/x/linkedin/
+        whatsapp), returns that URL to open in a new tab -- this actually
+        works today, no OAuth app needed. For instagram/tiktok/youtube,
+        there is no such unauthenticated intent; those platforms require
+        a registered OAuth developer app we don't have credentials for
+        (same category as the Nala payment integration -- see
+        payments/nala_client.py) -- returns manual=True with a ready-to-
+        paste caption instead of pretending to publish directly.
+        Every call is logged to SocialShareRecord for copyright/usage
+        tracking regardless of which path it took.
+        """
+        import urllib.parse
+
+        from django.conf import settings
+
+        from payments.models import Order
+
+        from .models import SocialShareRecord
+
+        listing = self.get_object()
+        provider = request.data.get("provider")
+        valid_providers = {c.value for c in SocialShareRecord.Provider}
+        if provider not in valid_providers:
+            return Response({"detail": f"provider must be one of {sorted(valid_providers)}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        is_owner_or_staff = listing.seller_id == user.id or (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        order = Order.objects.filter(buyer=user, listing=listing, status=Order.Status.PAID).order_by("-created_at").first()
+        if not (is_owner_or_staff or order):
+            return Response(
+                {"detail": "You need to purchase this listing before sharing it."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        SocialShareRecord.objects.create(user=user, listing=listing, order=order, provider=provider)
+
+        listing_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/listing.html?slug={listing.slug}"
+        caption = f"{listing.title} -- via WEMIX ({listing_url})"
+
+        SHARE_INTENT_URLS = {
+            "facebook": f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(listing_url, safe='')}",
+            "x": f"https://twitter.com/intent/tweet?text={urllib.parse.quote(listing.title, safe='')}&url={urllib.parse.quote(listing_url, safe='')}",
+            "linkedin": f"https://www.linkedin.com/sharing/share-offsite/?url={urllib.parse.quote(listing_url, safe='')}",
+            "whatsapp": f"https://api.whatsapp.com/send?text={urllib.parse.quote(caption, safe='')}",
+        }
+
+        if provider in SHARE_INTENT_URLS:
+            return Response({"manual": False, "share_url": SHARE_INTENT_URLS[provider]})
+
+        return Response({
+            "manual": True,
+            "caption": caption,
+            "detail": f"{dict(SocialShareRecord.Provider.choices)[provider]} doesn't offer a direct-post link "
+                      f"without a registered developer app (same situation as the Nala payment integration). "
+                      f"Copy the caption above and download the original media to post manually for now.",
+        })
 
     @action(detail=True, methods=["post"])
     def bookmark(self, request, slug=None):
@@ -484,3 +691,35 @@ class FollowToggleView(APIView):
             follow.delete()
             return Response({"is_following": False})
         return Response({"is_following": True})
+
+
+class MediaDownloadByTokenView(APIView):
+    """GET /api/news/media-download/<token>/ -- public (no Authorization
+    header required): streams a NewsMedia file if `token` is a valid,
+    unexpired signature from make_media_download_token(). The access
+    decision (did this user pay for the listing?) already happened in
+    NewsListingViewSet.download, which is the only place these tokens
+    are minted -- this view just proves the token is genuine and fresh."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, token=None):
+        from django.core import signing
+        from django.http import FileResponse, Http404
+
+        from .services import read_media_download_token
+
+        try:
+            media_id = read_media_download_token(token)
+        except signing.SignatureExpired:
+            return Response({"detail": "This download link has expired. Go back and click Download again."}, status=status.HTTP_403_FORBIDDEN)
+        except signing.BadSignature:
+            return Response({"detail": "Invalid download link."}, status=status.HTTP_403_FORBIDDEN)
+
+        media_obj = get_object_or_404(NewsMedia, pk=media_id)
+        if not media_obj.file:
+            raise Http404("No file attached to this media item.")
+        return FileResponse(
+            media_obj.file.open("rb"), as_attachment=True,
+            filename=media_obj.file.name.rsplit("/", 1)[-1],
+        )

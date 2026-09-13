@@ -14,5 +14,6 @@ urlpatterns = [
     path("bookmarks/", views.BookmarkListView.as_view(), name="bookmarks"),
     path("following/", views.FollowingListView.as_view(), name="following"),
     path("users/<uuid:user_id>/follow/", views.FollowToggleView.as_view(), name="follow-toggle"),
+    path("media-download/<str:token>/", views.MediaDownloadByTokenView.as_view(), name="media-download-by-token"),
     path("", include(router.urls)),
 ]

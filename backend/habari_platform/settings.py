@@ -149,6 +149,8 @@ REST_FRAMEWORK = {
         "login": "10/minute",
         "otp": "5/minute",
         "payment_webhook": "120/minute",
+        "kyc_submit": "5/hour",
+        "withdrawal_submit": "10/hour",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -197,6 +199,23 @@ ALLOWED_UPLOAD_VIDEO_TYPES = ["video/mp4", "video/quicktime"]
 # Platform business rules
 # ------------------------------------------------------------------
 PLATFORM_COMMISSION_RATE = env.float("PLATFORM_COMMISSION_RATE", default=0.10)  # 10%
+
+# Terms & Conditions: bump this whenever the terms text materially
+# changes -- accounts/views.py re-prompts a user to re-accept whenever
+# their latest TermsAcceptance.version doesn't match this.
+TERMS_VERSION = env("TERMS_VERSION", default="2026-09-13")
+
+# Withdrawal fraud/velocity limits (TZS). A moderator can still see and
+# override an individual request; these just gate self-service creation.
+# NOTE: these defaults are a reasonable starting point, not a confirmed
+# business policy figure -- tune via env vars once finance signs off on
+# real limits.
+WITHDRAWAL_DAILY_LIMIT = env.float("WITHDRAWAL_DAILY_LIMIT", default=2_000_000)
+WITHDRAWAL_WEEKLY_LIMIT = env.float("WITHDRAWAL_WEEKLY_LIMIT", default=8_000_000)
+WITHDRAWAL_MONTHLY_LIMIT = env.float("WITHDRAWAL_MONTHLY_LIMIT", default=20_000_000)
+# A single request at/above this is flagged for extra moderator scrutiny
+# (not blocked) -- surfaced as a warning pill in the withdrawal queue.
+WITHDRAWAL_RISK_FLAG_THRESHOLD = env.float("WITHDRAWAL_RISK_FLAG_THRESHOLD", default=1_500_000)
 
 # ------------------------------------------------------------------
 # Selcom payment gateway

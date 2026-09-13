@@ -28,6 +28,39 @@ const STAFF_ROLES = ['moderator', 'admin', 'super_admin'];
 const ADMIN_ROLES = ['admin', 'super_admin'];
 let CURRENT_USER = null;
 
+/* Downloads a JWT-gated endpoint's response as a file -- a plain <a href>
+   to an authenticated API URL doesn't carry the Bearer token, so file
+   downloads need a real fetch + blob + object-URL click, same pattern as
+   listing.html's media download. */
+async function downloadAuthenticated(path, defaultFilename, btn) {
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const resp = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { Authorization: `Bearer ${Auth.getAccessToken()}` },
+    });
+    if (!resp.ok) throw new Error(`Download failed (HTTP ${resp.status}).`);
+    const blob = await resp.blob();
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : defaultFilename;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(err.message || 'Download failed.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
 function pillFor(status, map) {
   return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace(/_/g, ' '))}</span>`;
 }
@@ -112,6 +145,7 @@ async function init() {
       <div class="dash-tab" data-tab="users">Users</div>
       <div class="dash-tab" data-tab="listings">Listings</div>
       <div class="dash-tab" data-tab="transactions">Transactions</div>
+      ${ADMIN_ROLES.includes(me.role) ? `<div class="dash-tab" data-tab="treasury">Treasury</div>` : ''}
       <div class="dash-tab" data-tab="settings">Settings</div>
       <div class="dash-tab" data-tab="reports">Reports</div>
     </div>
@@ -136,6 +170,7 @@ function renderTab(tab) {
       { key: 'kyc', label: 'Identity (KYC)', render: renderVerificationQueue },
       { key: 'listings', label: 'Listings & AI score', render: renderListingVerificationQueue },
       { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
+      { key: 'corporate', label: 'Corporate (KYB)', render: renderCorporateQueue },
     ], 'kyc');
   }
   if (tab === 'users') return renderUsersTab(content);
@@ -154,11 +189,14 @@ function renderTab(tab) {
       { key: 'wallet', label: 'Platform wallet & commissions', render: renderPlatformWallet },
     ], 'sales');
   }
+  if (tab === 'treasury') return renderTreasuryTab(content);
   if (tab === 'settings') return renderSettingsTab(content);
   if (tab === 'reports') {
     return renderSubTabs(content, [
       { key: 'reports', label: 'User reports', render: renderReportsQueue },
       { key: 'queue', label: 'Unified queue', render: renderUnifiedQueue },
+      { key: 'support', label: 'Support tickets', render: renderSupportQueue },
+      { key: 'financials', label: 'Financials', render: renderFinancialsTab },
     ], 'reports');
   }
 }
@@ -232,12 +270,30 @@ function renderListingFullDetails(listing) {
 
   const mediaHtml = (listing.media || []).length
     ? `<div style="display:flex; gap:10px; flex-wrap:wrap; margin:10px 0;">
-        ${listing.media.map((m) => `
+        ${listing.media.map((m) => {
+          const src = m.file || m.preview_file;
+          const filename = (src || '').split('/').pop();
+          let previewHtml;
+          if (m.media_type === 'video') {
+            previewHtml = `<video src="${src}" controls preload="metadata" style="width:140px;height:90px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);background:#000;"></video>`;
+          } else if (m.media_type === 'document') {
+            previewHtml = `
+              <a href="${src}" target="_blank" rel="noopener" style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100px; height:70px; border-radius:6px; border:1px solid var(--color-border); background:#f4f6fb; text-decoration:none; color:var(--color-text);">
+                <span style="font-size:1.4rem;">📄</span>
+                <span class="text-muted" style="font-size:0.65rem; padding:0 4px; word-break:break-all;">${escapeHtml(filename)}</span>
+              </a>`;
+          } else {
+            previewHtml = `<img src="${m.preview_file || m.file}" alt="" class="mod-media-zoom" data-full="${src}" style="width:100px;height:70px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:zoom-in;">`;
+          }
+          return `
           <div style="text-align:center;">
-            <img src="${m.preview_file || m.file}" alt="" style="width:100px;height:70px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);">
+            ${previewHtml}
+            <div class="text-muted" style="font-size:0.65rem; margin-top:2px; text-transform:uppercase; letter-spacing:0.03em;">${escapeHtml(m.media_type)}${m.is_cover ? ' &middot; cover' : ''}</div>
+            ${m.media_type !== 'image' ? `<a href="${src}" download class="text-muted" style="font-size:0.7rem;">Download</a>` : ''}
             ${(m.analysis_results || []).map((a) => `<div class="text-muted" style="font-size:0.7rem; margin-top:2px;">${a.flagged ? '<span style="color:var(--color-danger);">⚠ flagged</span>' : 'clean'} &middot; manip. ${a.manipulation_score}</div>`).join('')}
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>`
     : '<p class="text-muted" style="font-size:0.85rem;">No media attached.</p>';
 
@@ -252,7 +308,7 @@ function renderListingFullDetails(listing) {
     </p>
     <p style="font-size:0.8rem;"><strong>Location:</strong> ${escapeHtml(listing.location || 'n/a')} &middot; <strong>Tags:</strong> ${tagsHtml}</p>
     <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Full story body:</p>
-    <div class="card" style="padding:14px; background:#faf8f2; margin-bottom:14px;">
+    <div class="card" style="padding:14px; background:#f4f6fb; margin-bottom:14px;">
       <p style="white-space:pre-wrap; font-size:0.85rem; margin:0;">${escapeHtml(listing.body || '(empty)')}</p>
     </div>
     <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Attached media:</p>
@@ -289,6 +345,42 @@ function wireVerifiedBadgeButton(panel, onDone) {
   });
 }
 
+function wireMediaZoom(panel) {
+  panel.querySelectorAll('.mod-media-zoom').forEach((img) => {
+    img.addEventListener('click', () => {
+      openModal('Image preview', `<img src="${img.dataset.full}" alt="" style="max-width:100%; max-height:70vh; display:block; margin:0 auto; border-radius:6px;">`);
+    });
+  });
+}
+
+function deletePermanentlyHtml(slug) {
+  return `
+    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--color-danger);">
+      <div id="delete-perm-alert-${slug}"></div>
+      <button class="btn btn-outline btn-sm mod-delete-permanently" data-slug="${slug}" style="border-color:var(--color-danger); color:var(--color-danger);">Delete Permanently</button>
+    </div>
+  `;
+}
+
+function wireDeletePermanentlyButton(panel, slug, onDone) {
+  const btn = panel.querySelector('.mod-delete-permanently');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const alertBox = document.getElementById(`delete-perm-alert-${slug}`);
+    if (!confirm('Permanently delete this listing? This action cannot be undone.')) return;
+    const reason = prompt('Reason for permanent deletion (required):');
+    if (!reason || !reason.trim()) return;
+    btn.disabled = true;
+    try {
+      await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/delete-permanently/`, { method: 'POST', body: { reason } });
+      if (onDone) onDone();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+    }
+  });
+}
+
 async function renderListingVerificationQueue(content) {
   const verificationMap = {
     verified: 'pill-verified', partially_verified: 'pill-pending',
@@ -301,13 +393,25 @@ async function renderListingVerificationQueue(content) {
       content.innerHTML = `<div class="empty-state"><h3>Queue is empty</h3><p>No listings are currently awaiting a verification decision.</p></div>`;
       return;
     }
-    content.innerHTML = results.map((l) => {
+    const bulkBar = `
+      <div class="card" style="padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+          <input type="checkbox" id="listmod-select-all" style="width:auto;"> Select all
+        </label>
+        <span class="text-muted" style="font-size:0.82rem;" id="listmod-selected-count">0 selected</span>
+        <button class="btn btn-sm" id="listmod-bulk-approve" disabled style="margin-left:auto;">Approve &amp; publish selected</button>
+        <button class="btn btn-outline btn-sm" id="listmod-bulk-reject" disabled>Reject selected</button>
+      </div>
+      <div id="listmod-bulk-alert"></div>
+    `;
+    content.innerHTML = bulkBar + results.map((l) => {
       const scoreColor = l.ai_score == null ? 'var(--color-text-muted)' : (l.ai_score >= 70 ? 'var(--color-success)' : (l.ai_score >= 40 ? 'var(--color-gold-dark)' : 'var(--color-danger)'));
       return `
       <div class="card" style="padding:18px 20px; margin-bottom:12px;">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <input type="checkbox" class="listmod-select" data-slug="${l.slug}" style="width:auto;">
               <strong>${escapeHtml(l.title)}</strong>
               ${pillFor(l.verification_status, verificationMap)}
             </div>
@@ -342,9 +446,11 @@ async function renderListingVerificationQueue(content) {
         panel.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
         try {
           const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
-          panel.innerHTML = renderListingFullDetails(listing);
+          panel.innerHTML = renderListingFullDetails(listing) + deletePermanentlyHtml(slug);
           panel.dataset.loaded = '1';
           wireVerifiedBadgeButton(panel, loadDetails);
+          wireMediaZoom(panel);
+          wireDeletePermanentlyButton(panel, slug, () => renderListingVerificationQueue(content));
         } catch (err) {
           panel.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
         }
@@ -377,6 +483,47 @@ async function renderListingVerificationQueue(content) {
     };
     content.querySelectorAll('.listmod-approve').forEach((btn) => btn.addEventListener('click', () => doModerate(btn.dataset.slug, 'approve')));
     content.querySelectorAll('.listmod-reject').forEach((btn) => btn.addEventListener('click', () => doModerate(btn.dataset.slug, 'reject')));
+
+    /* Bulk actions: selecting checkboxes enables the toolbar buttons,
+       which fire the same per-listing /moderate/ endpoint concurrently
+       for every selected slug -- no new bulk API needed. */
+    const checkboxes = () => Array.from(content.querySelectorAll('.listmod-select'));
+    const selectedCount = document.getElementById('listmod-selected-count');
+    const bulkApproveBtn = document.getElementById('listmod-bulk-approve');
+    const bulkRejectBtn = document.getElementById('listmod-bulk-reject');
+    const selectAllBox = document.getElementById('listmod-select-all');
+
+    const updateBulkState = () => {
+      const selected = checkboxes().filter((cb) => cb.checked);
+      selectedCount.textContent = `${selected.length} selected`;
+      bulkApproveBtn.disabled = selected.length === 0;
+      bulkRejectBtn.disabled = selected.length === 0;
+    };
+    checkboxes().forEach((cb) => cb.addEventListener('change', updateBulkState));
+    selectAllBox.addEventListener('change', () => {
+      checkboxes().forEach((cb) => { cb.checked = selectAllBox.checked; });
+      updateBulkState();
+    });
+
+    const doBulkModerate = async (decision) => {
+      const slugs = checkboxes().filter((cb) => cb.checked).map((cb) => cb.dataset.slug);
+      if (!slugs.length) return;
+      if (!confirm(`${decision === 'approve' ? 'Approve & publish' : 'Reject'} ${slugs.length} listing(s)?`)) return;
+      const alertBox = document.getElementById('listmod-bulk-alert');
+      alertBox.innerHTML = '';
+      bulkApproveBtn.disabled = true;
+      bulkRejectBtn.disabled = true;
+      const results = await Promise.allSettled(
+        slugs.map((slug) => apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/moderate/`, { method: 'POST', body: { decision, notes: 'Bulk action.' } }))
+      );
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures) {
+        alertBox.innerHTML = `<div class="alert alert-error">${failures} of ${slugs.length} failed. Check individual listings for details.</div>`;
+      }
+      renderListingVerificationQueue(content);
+    };
+    bulkApproveBtn.addEventListener('click', () => doBulkModerate('approve'));
+    bulkRejectBtn.addEventListener('click', () => doBulkModerate('reject'));
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
@@ -395,6 +542,9 @@ async function renderPayoutAccountsQueue(content) {
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(a.account_name)}</strong>
+            ${a.name_match_score != null ? (a.name_match_score < 70
+              ? `<span class="pill pill-rejected" title="Fuzzy match against the user's verified KYC name">&#9888; name match ${a.name_match_score}%</span>`
+              : `<span class="pill pill-verified" title="Fuzzy match against the user's verified KYC name">name match ${a.name_match_score}%</span>`) : ''}
             <p style="margin:4px 0; font-size:0.85rem;">${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${escapeHtml(a.account_type.replace('_', ' '))} &middot; ${timeAgo(a.created_at)}</p>
           </div>
@@ -422,6 +572,59 @@ async function renderPayoutAccountsQueue(content) {
     content.querySelectorAll('.payout-mod-reject').forEach((btn) => {
       btn.addEventListener('click', () => {
         const reason = document.querySelector(`.payout-mod-reason[data-id="${btn.dataset.id}"]`)?.value || '';
+        doReview(btn.dataset.id, 'rejected', { rejection_reason: reason });
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function renderCorporateQueue(content) {
+  const kybMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected' };
+  try {
+    const data = await apiFetch('/api/accounts/corporate-verifications/queue/');
+    const results = data.results || data;
+    if (!results.length) {
+      content.innerHTML = `<div class="empty-state"><h3>No pending corporate verifications</h3></div>`;
+      return;
+    }
+    content.innerHTML = results.map((c) => `
+      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="flex-between" style="align-items:flex-start;">
+          <div>
+            <strong>${escapeHtml(c.company_name)}</strong> ${pillFor(c.status, kybMap)}
+            <p style="margin:6px 0; font-size:0.85rem;">
+              <a href="${c.business_license}" target="_blank">Business license</a> &middot;
+              <a href="${c.company_registration}" target="_blank">Company registration</a>
+              ${c.tax_document ? ` &middot; <a href="${c.tax_document}" target="_blank">Tax document</a>` : ''}
+            </p>
+            <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(c.created_at)}</p>
+          </div>
+          <div style="min-width:200px;">
+            <div id="corp-mod-alert-${c.id}"></div>
+            <button class="btn btn-sm btn-block corp-mod-verify" data-id="${c.id}" style="margin-bottom:6px;">Verify</button>
+            <input type="text" class="corp-mod-reason" data-id="${c.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-outline btn-sm btn-block corp-mod-reject" data-id="${c.id}">Reject</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    const doReview = async (id, statusValue, extra = {}) => {
+      const alertBox = document.getElementById(`corp-mod-alert-${id}`);
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/accounts/corporate-verifications/${id}/review/`, { method: 'PATCH', body: { status: statusValue, ...extra } });
+        renderCorporateQueue(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    };
+    content.querySelectorAll('.corp-mod-verify').forEach((btn) => btn.addEventListener('click', () => doReview(btn.dataset.id, 'verified')));
+    content.querySelectorAll('.corp-mod-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const reason = document.querySelector(`.corp-mod-reason[data-id="${btn.dataset.id}"]`)?.value || '';
         doReview(btn.dataset.id, 'rejected', { rejection_reason: reason });
       });
     });
@@ -865,10 +1068,13 @@ async function renderAllListings(content) {
                 <button class="btn btn-sm all-listing-approve" data-slug="${slug}">Approve &amp; publish</button>
                 <button class="btn btn-outline btn-sm all-listing-reject" data-slug="${slug}">Reject</button>
               </div>
+              ${deletePermanentlyHtml(slug)}
             `;
             panel.innerHTML = html;
             panel.dataset.loaded = '1';
             wireVerifiedBadgeButton(panel, loadDetails);
+            wireMediaZoom(panel);
+            wireDeletePermanentlyButton(panel, slug, load);
 
             const doModerate = async (decision) => {
               const alertBox = document.getElementById(`all-listing-mod-alert-${slug}`);
@@ -1083,6 +1289,7 @@ async function renderWithdrawalsQueue(content) {
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(w.wallet_owner_username)}</strong> &middot; ${money(w.amount)}
+            ${w.risk_flagged ? `<span class="pill pill-rejected" title="At/above the configured single-withdrawal risk threshold">&#9888; high value</span>` : ''}
             <p class="text-muted" style="margin:4px 0; font-size:0.85rem;">${escapeHtml(w.destination_type.replace('_',' '))} &middot; ${escapeHtml(JSON.stringify(w.destination_details))}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(w.created_at)}</p>
           </div>
@@ -1151,6 +1358,175 @@ async function renderPlatformWallet(content) {
         </div>
       `).join('') : '<p class="text-muted">No ledger entries yet.</p>'}
     `;
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* TREASURY tab (admin/super_admin only)                                  */
+/* ---------------------------------------------------------------------- */
+
+async function renderTreasuryTab(content) {
+  const isSuperAdmin = CURRENT_USER?.role === 'super_admin';
+  const statusMap = { requested: 'pill-pending', approved: 'pill-pending', completed: 'pill-verified', rejected: 'pill-rejected' };
+
+  content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  try {
+    const [walletData, accountsResp, withdrawalsResp] = await Promise.all([
+      apiFetch('/api/wallet/platform/'),
+      apiFetch('/api/wallet/company/payout-accounts/'),
+      apiFetch('/api/wallet/company/withdrawals/'),
+    ]);
+    const accounts = accountsResp.results || accountsResp;
+    const withdrawals = withdrawalsResp.results || withdrawalsResp;
+    const activeAccounts = accounts.filter((a) => a.is_active);
+
+    content.innerHTML = `
+      <div class="card" style="padding:20px; margin-bottom:20px;">
+        <p class="text-muted" style="margin:0;">Platform commission balance</p>
+        <div style="font-size:2rem; font-weight:700;">${money(walletData.wallet.balance, walletData.wallet.currency)}</div>
+        <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">Company withdrawals below move money out of this balance. Approval requires a super_admin ("company owner") account.</p>
+      </div>
+
+      <div class="card" style="padding:20px; margin-bottom:20px;">
+        <h3 style="margin-top:0;">Company payout accounts</h3>
+        <div id="treasury-account-alert"></div>
+        ${accounts.length ? accounts.map((a) => `
+          <div class="table-row">
+            <span>${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</span>
+            <span class="text-muted">${escapeHtml(a.account_name)}</span>
+            <span>${a.is_active ? '<span class="pill pill-verified">active</span>' : '<span class="pill pill-draft">inactive</span>'}</span>
+          </div>
+        `).join('') : '<p class="text-muted">No company payout accounts yet -- add one below.</p>'}
+        <form id="treasury-account-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+          <div class="field-row">
+            <div class="form-group">
+              <label for="ta-type">Account type</label>
+              <select id="ta-type"><option value="bank_account">Bank Account</option><option value="mobile_money">Mobile Money</option></select>
+            </div>
+            <div class="form-group"><label for="ta-provider">Provider</label><input type="text" id="ta-provider" placeholder="e.g. CRDB Bank"></div>
+          </div>
+          <div class="field-row">
+            <div class="form-group"><label for="ta-number">Account number</label><input type="text" id="ta-number" required></div>
+            <div class="form-group"><label for="ta-name">Account name</label><input type="text" id="ta-name" required></div>
+          </div>
+          <button type="submit" class="btn btn-sm">Add company account</button>
+        </form>
+      </div>
+
+      <div class="card" style="padding:20px; margin-bottom:20px;">
+        <h3 style="margin-top:0;">Request a treasury withdrawal</h3>
+        <div id="treasury-request-alert"></div>
+        ${activeAccounts.length ? `
+          <form id="treasury-request-form">
+            <div class="field-row">
+              <div class="form-group">
+                <label for="tr-amount">Amount</label>
+                <input type="number" id="tr-amount" min="1" step="1" required>
+              </div>
+              <div class="form-group">
+                <label for="tr-account">Payout to</label>
+                <select id="tr-account">
+                  ${activeAccounts.map((a) => `<option value="${a.id}">${escapeHtml(a.provider || a.account_type)} &middot; ${escapeHtml(a.account_number)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="form-group"><label for="tr-reason">Reason</label><input type="text" id="tr-reason" placeholder="What this withdrawal is for"></div>
+            <button type="submit" class="btn btn-sm">Request withdrawal</button>
+          </form>
+        ` : '<div class="alert alert-info">Add a company payout account above first.</div>'}
+      </div>
+
+      <h4 style="margin-bottom:10px;">Withdrawal requests</h4>
+      <div id="treasury-withdrawals-list">
+        ${withdrawals.length ? withdrawals.map((w) => `
+          <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+            <div class="flex-between" style="align-items:flex-start;">
+              <div>
+                <strong>${money(w.amount)}</strong> &middot; ${escapeHtml(w.payout_account_display)}
+                ${pillFor(w.status, statusMap)}
+                <p class="text-muted" style="margin:4px 0 0 0; font-size:0.82rem;">${escapeHtml(w.reason || '')} &middot; requested by ${escapeHtml(w.requested_by_username)} &middot; ${timeAgo(w.created_at)}</p>
+              </div>
+              ${isSuperAdmin && w.status === 'requested' ? `
+                <div style="min-width:200px;">
+                  <div id="treasury-review-alert-${w.id}"></div>
+                  <input type="text" class="treasury-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <button class="btn btn-sm btn-block treasury-approve" data-id="${w.id}" style="margin-bottom:6px;">Approve &amp; complete</button>
+                  <input type="text" class="treasury-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <button class="btn btn-outline btn-sm btn-block treasury-reject" data-id="${w.id}">Reject</button>
+                </div>
+              ` : (w.status === 'requested' && !isSuperAdmin ? `<p class="text-muted" style="font-size:0.8rem;">Awaiting super_admin approval.</p>` : '')}
+            </div>
+          </div>
+        `).join('') : '<p class="text-muted">No treasury withdrawal requests yet.</p>'}
+      </div>
+    `;
+
+    document.getElementById('treasury-account-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertBox = document.getElementById('treasury-account-alert');
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch('/api/wallet/company/payout-accounts/', {
+          method: 'POST',
+          body: {
+            account_type: document.getElementById('ta-type').value,
+            provider: document.getElementById('ta-provider').value,
+            account_number: document.getElementById('ta-number').value,
+            account_name: document.getElementById('ta-name').value,
+          },
+        });
+        renderTreasuryTab(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    });
+
+    const requestForm = document.getElementById('treasury-request-form');
+    if (requestForm) {
+      requestForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertBox = document.getElementById('treasury-request-alert');
+        alertBox.innerHTML = '';
+        try {
+          await apiFetch('/api/wallet/company/withdrawals/', {
+            method: 'POST',
+            body: {
+              amount: document.getElementById('tr-amount').value,
+              payout_account: document.getElementById('tr-account').value,
+              reason: document.getElementById('tr-reason').value,
+            },
+          });
+          renderTreasuryTab(content);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    }
+
+    const doReview = async (id, statusValue, extra = {}) => {
+      const alertBox = document.getElementById(`treasury-review-alert-${id}`);
+      alertBox.innerHTML = '';
+      try {
+        await apiFetch(`/api/wallet/company/withdrawals/${id}/review/`, { method: 'POST', body: { status: statusValue, ...extra } });
+        renderTreasuryTab(content);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    };
+    content.querySelectorAll('.treasury-approve').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ref = document.querySelector(`.treasury-payout-ref[data-id="${btn.dataset.id}"]`)?.value || '';
+        doReview(btn.dataset.id, 'completed', { payout_reference: ref });
+      });
+    });
+    content.querySelectorAll('.treasury-reject').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const reason = document.querySelector(`.treasury-reject-reason[data-id="${btn.dataset.id}"]`)?.value || '';
+        doReview(btn.dataset.id, 'rejected', { rejection_reason: reason });
+      });
+    });
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
@@ -1391,15 +1767,29 @@ async function renderUnifiedQueue(content) {
       content.innerHTML = `<div class="empty-state"><h3>Queue is empty</h3><p>No open items.</p></div>`;
       return;
     }
-    content.innerHTML = results.map((item) => `
+    const bulkBar = `
+      <div class="card" style="padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+          <input type="checkbox" id="queue-select-all" style="width:auto;"> Select all
+        </label>
+        <span class="text-muted" style="font-size:0.82rem;" id="queue-selected-count">0 selected</span>
+        <button class="btn btn-sm" id="queue-bulk-resolve" disabled style="margin-left:auto;">Resolve selected</button>
+        <button class="btn btn-outline btn-sm" id="queue-bulk-dismiss" disabled>Dismiss selected</button>
+      </div>
+      <div id="queue-bulk-alert"></div>
+    `;
+    content.innerHTML = bulkBar + results.map((item) => `
       <div class="card" style="padding:16px 20px; margin-bottom:10px;">
         <div class="flex-between">
-          <div>
-            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
-              <strong>${escapeHtml((item.item_type || '').replace(/_/g, ' '))}</strong>
-              ${pillFor(item.priority, priorityMap)}
+          <div style="display:flex; align-items:flex-start; gap:10px;">
+            <input type="checkbox" class="queue-select" data-id="${item.id}" style="width:auto; margin-top:4px;">
+            <div>
+              <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+                <strong>${escapeHtml((item.item_type || '').replace(/_/g, ' '))}</strong>
+                ${pillFor(item.priority, priorityMap)}
+              </div>
+              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.8rem;">${timeAgo(item.created_at)} &middot; ref ${item.related_object_id.slice(0,8)}</p>
             </div>
-            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.8rem;">${timeAgo(item.created_at)} &middot; ref ${item.related_object_id.slice(0,8)}</p>
           </div>
           <div style="text-align:right;">
             <button class="btn btn-outline btn-sm queue-assign" data-id="${item.id}">Assign to me</button>
@@ -1421,9 +1811,213 @@ async function renderUnifiedQueue(content) {
     content.querySelectorAll('.queue-assign').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'assign', {})));
     content.querySelectorAll('.queue-resolve').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'resolve', { status: 'resolved', resolution_notes: 'Resolved via moderation dashboard.' })));
     content.querySelectorAll('.queue-dismiss').forEach((btn) => btn.addEventListener('click', () => doAction(btn.dataset.id, 'resolve', { status: 'dismissed' })));
+
+    const queueCheckboxes = () => Array.from(content.querySelectorAll('.queue-select'));
+    const queueSelectedCount = document.getElementById('queue-selected-count');
+    const queueBulkResolveBtn = document.getElementById('queue-bulk-resolve');
+    const queueBulkDismissBtn = document.getElementById('queue-bulk-dismiss');
+    const queueSelectAllBox = document.getElementById('queue-select-all');
+
+    const updateQueueBulkState = () => {
+      const selected = queueCheckboxes().filter((cb) => cb.checked);
+      queueSelectedCount.textContent = `${selected.length} selected`;
+      queueBulkResolveBtn.disabled = selected.length === 0;
+      queueBulkDismissBtn.disabled = selected.length === 0;
+    };
+    queueCheckboxes().forEach((cb) => cb.addEventListener('change', updateQueueBulkState));
+    queueSelectAllBox.addEventListener('change', () => {
+      queueCheckboxes().forEach((cb) => { cb.checked = queueSelectAllBox.checked; });
+      updateQueueBulkState();
+    });
+
+    const doBulkQueueAction = async (statusValue) => {
+      const ids = queueCheckboxes().filter((cb) => cb.checked).map((cb) => cb.dataset.id);
+      if (!ids.length) return;
+      if (!confirm(`${statusValue === 'resolved' ? 'Resolve' : 'Dismiss'} ${ids.length} item(s)?`)) return;
+      const alertBox = document.getElementById('queue-bulk-alert');
+      alertBox.innerHTML = '';
+      const body = statusValue === 'resolved' ? { status: 'resolved', resolution_notes: 'Bulk-resolved via moderation dashboard.' } : { status: 'dismissed' };
+      const results = await Promise.allSettled(
+        ids.map((id) => apiFetch(`/api/moderation/queue/${id}/resolve/`, { method: 'POST', body }))
+      );
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures) {
+        alertBox.innerHTML = `<div class="alert alert-error">${failures} of ${ids.length} failed.</div>`;
+      }
+      renderUnifiedQueue(content);
+    };
+    queueBulkResolveBtn.addEventListener('click', () => doBulkQueueAction('resolved'));
+    queueBulkDismissBtn.addEventListener('click', () => doBulkQueueAction('dismissed'));
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+/* SUPPORT TICKETS queue                                                  */
+/* ---------------------------------------------------------------------- */
+
+async function renderSupportQueue(content) {
+  content.innerHTML = `
+    <div class="field-row" style="margin-bottom:16px;">
+      <select id="support-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <option value="open">Open</option>
+        <option value="in_progress">In progress</option>
+        <option value="resolved">Resolved</option>
+        <option value="closed">Closed</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div id="support-list"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+  const statusMap = { open: 'pill-pending', in_progress: 'pill-pending', resolved: 'pill-verified', closed: 'pill-draft' };
+
+  const load = async () => {
+    const listEl = document.getElementById('support-list');
+    const statusFilter = document.getElementById('support-status-filter').value;
+    const params = new URLSearchParams({ all: '1' });
+    if (statusFilter) params.set('status', statusFilter);
+    try {
+      const data = await apiFetch(`/api/support-tickets/?${params.toString()}`);
+      const results = data.results || data;
+      if (!results.length) {
+        listEl.innerHTML = `<div class="empty-state"><h3>No tickets</h3></div>`;
+        return;
+      }
+      listEl.innerHTML = results.map((t) => `
+        <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+          <div class="flex-between" style="align-items:flex-start;">
+            <div>
+              <strong>${escapeHtml(t.subject)}</strong>
+              <span class="pill pill-draft" style="margin-left:6px;">${escapeHtml((t.category || '').replace('_', ' '))}</span>
+              ${pillFor(t.status, statusMap)}
+              <p class="text-muted" style="margin:6px 0 0 0; font-size:0.85rem;">${escapeHtml(t.user_username)}: ${escapeHtml(t.message)}</p>
+              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
+            </div>
+          </div>
+          ${(t.messages || []).length ? `
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap:6px;">
+              ${t.messages.map((m) => `
+                <div style="font-size:0.85rem;"><strong>${m.is_staff_reply ? 'Support' : escapeHtml(m.author_username)}:</strong> ${escapeHtml(m.message)} <span class="text-muted" style="font-size:0.72rem;">&middot; ${timeAgo(m.created_at)}</span></div>
+              `).join('')}
+            </div>
+          ` : ''}
+          <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+            <input type="text" class="support-reply-input" data-id="${t.id}" placeholder="Reply&hellip;" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <select class="support-reply-status" data-id="${t.id}" style="padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+              <option value="">Keep status</option>
+              <option value="in_progress">Mark in progress</option>
+              <option value="resolved">Mark resolved</option>
+              <option value="closed">Close</option>
+            </select>
+            <button class="btn btn-sm support-reply-btn" data-id="${t.id}">Send</button>
+          </div>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.support-reply-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const message = document.querySelector(`.support-reply-input[data-id="${id}"]`).value.trim();
+          const statusValue = document.querySelector(`.support-reply-status[data-id="${id}"]`).value;
+          if (!message) return;
+          btn.disabled = true;
+          try {
+            const body = { message };
+            if (statusValue) body.status = statusValue;
+            await apiFetch(`/api/support-tickets/${id}/reply/`, { method: 'POST', body });
+            load();
+          } catch (err) {
+            alert(formatApiError(err));
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('support-status-filter').addEventListener('change', load);
+  load();
+}
+
+/* ---------------------------------------------------------------------- */
+/* FINANCIALS report                                                      */
+/* ---------------------------------------------------------------------- */
+
+async function renderFinancialsTab(content) {
+  content.innerHTML = `
+    <div class="field-row" style="margin-bottom:16px; align-items:flex-end;">
+      <div class="form-group" style="margin-bottom:0;">
+        <label for="fin-period">Period</label>
+        <select id="fin-period">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <button class="btn btn-outline btn-sm" id="fin-export-link" style="margin-bottom:2px;">Export CSV</button>
+      <button class="btn btn-outline btn-sm" id="fin-export-pdf-link" style="margin-bottom:2px;">Export PDF</button>
+    </div>
+    <div id="fin-summary"></div>
+    <div id="fin-table"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+
+  document.getElementById('fin-export-link').addEventListener('click', (e) => {
+    const period = document.getElementById('fin-period').value;
+    downloadAuthenticated(`/api/payments/reports/export/?period=${period}`, `wemix-financial-report-${period}.csv`, e.currentTarget);
+  });
+  document.getElementById('fin-export-pdf-link').addEventListener('click', (e) => {
+    const period = document.getElementById('fin-period').value;
+    downloadAuthenticated(`/api/payments/reports/export-pdf/?period=${period}`, `wemix-financial-report-${period}.pdf`, e.currentTarget);
+  });
+
+  const load = async () => {
+    const period = document.getElementById('fin-period').value;
+    try {
+      const data = await apiFetch(`/api/payments/reports/?period=${period}`);
+      const maxSales = Math.max(1, ...data.results.map((r) => Number(r.gross_sales)));
+
+      document.getElementById('fin-summary').innerHTML = `
+        <div class="scoreboard" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:20px;">
+          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Gross sales</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.gross_sales)}</div></div>
+          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Platform commission</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.platform_commission)}</div></div>
+          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Orders</p><div style="font-size:1.3rem; font-weight:700;">${data.totals.order_count}</div></div>
+          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Refunded</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.refunded_amount)}</div></div>
+        </div>
+      `;
+
+      document.getElementById('fin-table').innerHTML = data.results.length ? `
+        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:20px;">
+          ${data.results.map((r) => `
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="text-muted mono" style="width:110px; font-size:0.78rem;">${escapeHtml(r.period)}</span>
+              <div style="flex:1; background:var(--color-bg-alt); border-radius:4px; overflow:hidden; height:18px;">
+                <div style="width:${(Number(r.gross_sales) / maxSales) * 100}%; background:var(--color-gold); height:100%;"></div>
+              </div>
+              <span style="width:120px; text-align:right; font-size:0.82rem;">${money(r.gross_sales)}</span>
+            </div>
+          `).join('')}
+        </div>
+        ${data.results.map((r) => `
+          <div class="table-row">
+            <span>${escapeHtml(r.period)}</span>
+            <span>${money(r.gross_sales)}</span>
+            <span class="text-muted">commission: ${money(r.platform_commission)}</span>
+            <span class="text-muted">${r.order_count} order(s)</span>
+            <span class="text-muted">refunded: ${money(r.refunded_amount)}</span>
+          </div>
+        `).join('')}
+      ` : '<p class="text-muted">No paid orders in this range yet.</p>';
+    } catch (err) {
+      document.getElementById('fin-table').innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('fin-period').addEventListener('change', load);
+  load();
 }
 
 init();

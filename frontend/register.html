@@ -10,12 +10,31 @@
 </head>
 <body>
 
-<div id="topnav-root"></div>
+<div class="auth-page">
+  <aside class="auth-panel-brand">
+    <div class="auth-panel-wordmark">WEMIX<span>.</span></div>
+    <div class="auth-panel-content">
+      <span class="auth-panel-eyebrow">Global News Market</span>
+      <h1>Join as a buyer, journalist, or media house.</h1>
+      <p>Sell verified, fact-checked stories to a real marketplace of readers, or unlock exclusive reporting the moment it's published.</p>
+    </div>
+    <ul class="auth-panel-points">
+      <li>Free to join -- WEMIX only takes a commission on sales</li>
+      <li>Citizen and professional journalist tiers, both verifiable</li>
+      <li>Corporate/organization buyer accounts supported</li>
+    </ul>
+    <div class="auth-panel-foot">&copy; 2026 WEMIX &mdash; Global News Market</div>
+  </aside>
 
-<div class="auth-shell">
-  <div class="card form-card">
-    <h2>Create your account</h2>
-    <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Join as a buyer, journalist, or media house.</p>
+  <div class="auth-form-col">
+    <div class="auth-form-topbar">
+      <a href="index.html"><img src="images/wemix.jpeg" alt="WEMIX"></a>
+      <a href="index.html" class="auth-back-link">&larr; Back to marketplace</a>
+    </div>
+    <div class="auth-form-center">
+      <div class="card auth-form-card" style="padding:32px;">
+        <h2>Create your account</h2>
+        <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Join as a buyer, journalist, or media house.</p>
 
     <div id="form-alert"></div>
 
@@ -61,6 +80,14 @@
         <input type="text" id="organization_name">
       </div>
 
+      <div class="form-group hidden" id="journalist-tier-group">
+        <label for="journalist_tier">Journalist type</label>
+        <select id="journalist_tier">
+          <option value="citizen">Citizen Journalist &mdash; basic ID verification</option>
+          <option value="professional">Professional Journalist &mdash; press card / media house credential (can be added after signup)</option>
+        </select>
+      </div>
+
       <div class="form-group">
         <label for="password">Password</label>
         <input type="password" id="password" required autocomplete="new-password">
@@ -71,20 +98,27 @@
         <input type="password" id="password_confirm" required autocomplete="new-password">
       </div>
 
+      <label style="font-size:0.85rem; display:flex; align-items:flex-start; gap:8px; margin-bottom:16px;">
+        <input type="checkbox" id="terms_accepted" required style="width:auto; margin-top:3px;">
+        <span>I have read and agree to the <a href="terms.html" target="_blank" style="color:var(--color-gold-dark); font-weight:600;">Terms &amp; Conditions</a>.</span>
+      </label>
+
       <button type="submit" class="btn btn-block" id="submit-btn">Create account</button>
     </form>
 
-    <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
-      Already have an account? <a href="login.html" style="color:var(--color-gold-dark); font-weight:600;">Log in</a>
-    </p>
+        <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+          Already have an account? <a href="login.html" style="color:var(--color-gold-dark); font-weight:600;">Log in</a>
+        </p>
+      </div>
+    </div>
   </div>
 </div>
 
 <script src="js/api.js"></script>
-<script src="js/nav.js"></script>
 <script>
 document.getElementById('role').addEventListener('change', (e) => {
   document.getElementById('org-name-group').classList.toggle('hidden', e.target.value !== 'media_house');
+  document.getElementById('journalist-tier-group').classList.toggle('hidden', !['journalist', 'media_house'].includes(e.target.value));
 });
 
 document.getElementById('register-form').addEventListener('submit', async (e) => {
@@ -93,17 +127,25 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
   const submitBtn = document.getElementById('submit-btn');
   alertBox.innerHTML = '';
 
+  const role = document.getElementById('role').value;
   const payload = {
     first_name: document.getElementById('first_name').value,
     last_name: document.getElementById('last_name').value,
     username: document.getElementById('username').value,
     email: document.getElementById('email').value,
     phone_number: document.getElementById('phone_number').value,
-    role: document.getElementById('role').value,
+    role,
     organization_name: document.getElementById('organization_name').value,
+    journalist_tier: ['journalist', 'media_house'].includes(role) ? document.getElementById('journalist_tier').value : 'none',
     password: document.getElementById('password').value,
     password_confirm: document.getElementById('password_confirm').value,
+    terms_accepted: document.getElementById('terms_accepted').checked,
   };
+
+  if (!payload.terms_accepted) {
+    alertBox.innerHTML = `<div class="alert alert-error">You must accept the Terms &amp; Conditions to create an account.</div>`;
+    return;
+  }
 
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="spinner"></span> Creating account&hellip;';

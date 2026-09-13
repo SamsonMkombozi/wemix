@@ -86,6 +86,27 @@ def credit_wallet_on_sale(order) -> None:
         NewsListing.objects.filter(pk=listing.pk).update(purchase_count=F("purchase_count") + 1)
 
 
+def debit_platform_wallet_for_company_withdrawal(company_withdrawal) -> None:
+    """Mirrors debit_wallet_for_withdrawal but against the singleton
+    PlatformWallet, for a CompanyWithdrawalRequest (moving commission
+    revenue out to a company-owned bank/mobile-money account)."""
+    with transaction.atomic():
+        platform_wallet = Wallet.objects.select_for_update().get(is_platform=True)
+        if platform_wallet.balance < company_withdrawal.amount:
+            raise ValueError("Insufficient platform wallet balance for this withdrawal.")
+
+        platform_wallet.balance = platform_wallet.balance - company_withdrawal.amount
+        platform_wallet.save(update_fields=["balance", "updated_at"])
+        WalletTransaction.objects.create(
+            wallet=platform_wallet,
+            entry_type=WalletTransaction.EntryType.WITHDRAWAL_DEBIT,
+            amount=-company_withdrawal.amount,
+            balance_after=platform_wallet.balance,
+            reference=str(company_withdrawal.id),
+            description=f"Company treasury withdrawal: {company_withdrawal.reason or 'no reason given'}",
+        )
+
+
 def debit_wallet_for_withdrawal(withdrawal_request) -> None:
     """Moves funds from available balance into a pending state is handled
     at the request layer (WithdrawalRequest.status); this writes the

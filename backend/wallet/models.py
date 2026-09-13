@@ -158,7 +158,67 @@ class WithdrawalRequest(BaseModel):
     reviewed_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=255, blank=True)
     payout_reference = models.CharField(max_length=100, blank=True)
+    risk_flagged = models.BooleanField(
+        default=False, db_index=True,
+        help_text="Set at creation if the amount is at/above settings.WITHDRAWAL_RISK_FLAG_THRESHOLD "
+                   "-- surfaced to moderators as a warning, doesn't block the request.",
+    )
 
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["wallet", "status"])]
+
+
+class CompanyPayoutAccount(BaseModel):
+    """A bank/mobile-money account the BUSINESS itself owns, that platform
+    commission revenue can be withdrawn to. Distinct from PayoutAccount
+    (a seller's own payout destination) -- this is the treasury side."""
+
+    account_type = models.CharField(max_length=20, choices=PayoutAccount.AccountType.choices)
+    provider = models.CharField(max_length=100, blank=True)
+    account_number = models.CharField(max_length=100)
+    account_name = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-is_active", "-created_at"]
+
+    def __str__(self):
+        return f"Company: {self.get_account_type_display()} ({self.account_number})"
+
+
+class CompanyWithdrawalRequest(BaseModel):
+    """A request to move platform commission revenue out of the
+    PlatformWallet to a CompanyPayoutAccount. Any admin can request one;
+    only a super_admin ('company owner' tier) can approve/complete it --
+    a deliberately stricter gate than seller withdrawals, since this
+    moves the business's own money rather than paying out a seller."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        APPROVED = "approved", "Approved"
+        COMPLETED = "completed", "Completed"
+        REJECTED = "rejected", "Rejected"
+
+    payout_account = models.ForeignKey(
+        CompanyPayoutAccount, on_delete=models.PROTECT, related_name="withdrawal_requests"
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.CharField(max_length=255, blank=True, help_text="What this withdrawal is for.")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="company_withdrawal_requests"
+    )
+    status = models.CharField(max_length=15, choices=Status.choices, default=Status.REQUESTED, db_index=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    payout_reference = models.CharField(max_length=100, blank=True)
+    rejection_reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status"])]

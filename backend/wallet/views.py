@@ -1,11 +1,22 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from core.permissions import IsModeratorOrAbove
-from .models import PayoutAccount, Wallet, WalletTransaction, WithdrawalRequest
+from core.permissions import IsAdminOrAbove, IsModeratorOrAbove, IsSuperAdmin
+from .models import (
+    CompanyPayoutAccount,
+    CompanyWithdrawalRequest,
+    PayoutAccount,
+    Wallet,
+    WalletTransaction,
+    WithdrawalRequest,
+)
 from .serializers import (
+    CompanyPayoutAccountSerializer,
+    CompanyWithdrawalRequestSerializer,
+    CompanyWithdrawalReviewSerializer,
     PayoutAccountReviewSerializer,
     PayoutAccountSerializer,
     WalletSerializer,
@@ -48,6 +59,12 @@ class WithdrawalRequestListCreateView(generics.ListCreateAPIView):
         context = super().get_serializer_context()
         context["wallet"] = get_or_create_user_wallet(self.request.user)
         return context
+
+    def get_throttles(self):
+        if self.request.method == "POST":
+            self.throttle_scope = "withdrawal_submit"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
 
 class WithdrawalRequestQueueView(generics.ListAPIView):
@@ -166,3 +183,42 @@ class PlatformWalletView(APIView):
             "commission_entries_last_30_days": commission_last_30_days,
             "recent_entries": WalletTransactionSerializer(recent_entries, many=True).data,
         })
+
+
+class CompanyPayoutAccountListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/wallet/company/payout-accounts/ -- the business's own
+    bank/mobile-money accounts that commission revenue can be withdrawn
+    to. Admin-managed (adding one doesn't need super_admin -- only
+    approving a withdrawal against it does)."""
+
+    serializer_class = CompanyPayoutAccountSerializer
+    permission_classes = [IsAdminOrAbove]
+    queryset = CompanyPayoutAccount.objects.all()
+
+
+class CompanyWithdrawalRequestListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/wallet/company/withdrawals/ -- any admin can request
+    a treasury withdrawal; approval is gated separately (see the review
+    view below)."""
+
+    serializer_class = CompanyWithdrawalRequestSerializer
+    permission_classes = [IsAdminOrAbove]
+    queryset = CompanyWithdrawalRequest.objects.select_related("payout_account", "requested_by").all()
+
+
+class CompanyWithdrawalReviewView(APIView):
+    """POST /api/wallet/company/withdrawals/<id>/review/ -- super_admin
+    only. 'Only company owners may approve' from the business
+    requirement maps to the platform's super_admin role -- the tier
+    above regular admin."""
+
+    permission_classes = [IsSuperAdmin]
+
+    def post(self, request, pk=None):
+        withdrawal = get_object_or_404(CompanyWithdrawalRequest, pk=pk)
+        serializer = CompanyWithdrawalReviewSerializer(
+            data=request.data, context={"withdrawal": withdrawal, "request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CompanyWithdrawalRequestSerializer(withdrawal).data)

@@ -30,6 +30,7 @@ if (['moderator', 'admin', 'super_admin'].includes(_dashUser?.role)) {
 const gate = document.getElementById('gate');
 
 gate.innerHTML = `
+  <div id="terms-banner"></div>
   <div class="dash-grid">
     <aside class="dash-sidebar">
       <div class="card" id="me-card">
@@ -48,11 +49,36 @@ gate.innerHTML = `
         <div class="dash-tab" data-tab="bookmarks">Bookmarks</div>
         <div class="dash-tab" data-tab="following">Following</div>
         <div class="dash-tab" data-tab="withdrawals">Withdrawals</div>
+        <div class="dash-tab" data-tab="support">Support</div>
       </div>
       <div id="tab-content"></div>
     </section>
   </div>
 `;
+
+(async () => {
+  try {
+    const termsStatus = await apiFetch('/api/terms/status/');
+    if (termsStatus.needs_acceptance) {
+      document.getElementById('terms-banner').innerHTML = `
+        <div class="alert alert-info" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+          <span>Our <a href="terms.html" target="_blank" style="font-weight:600;">Terms &amp; Conditions</a> have been updated (v${escapeHtml(termsStatus.current_version)}). Please review and re-accept to continue.</span>
+          <button class="btn btn-sm" id="terms-reaccept-btn">I accept</button>
+        </div>
+      `;
+      document.getElementById('terms-reaccept-btn').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try {
+          await apiFetch('/api/terms/accept/', { method: 'POST', body: { version: termsStatus.current_version } });
+          document.getElementById('terms-banner').innerHTML = '';
+        } catch (err) {
+          alert(formatApiError(err));
+          e.target.disabled = false;
+        }
+      });
+    }
+  } catch (e) { /* non-fatal */ }
+})();
 
 document.querySelectorAll('.dash-tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -61,6 +87,125 @@ document.querySelectorAll('.dash-tab').forEach((tab) => {
     renderTab(tab.dataset.tab);
   });
 });
+
+/* Country -> Region -> District hierarchy (real Tanzanian administrative
+   regions/districts, a representative subset -- not exhaustive of every
+   ward). City/area stays free text since hand-curating every ward
+   accurately isn't practical; this still replaces pure free-text entry
+   for the region/district levels, which is where search/filter
+   fragmentation ("Dar es Salaam" vs "DSM" vs "Dar-es-Salaam") mattered most. */
+const TZ_LOCATIONS = {
+  'Dar es Salaam': ['Ilala', 'Kinondoni', 'Temeke', 'Ubungo', 'Kigamboni'],
+  'Arusha': ['Arusha City', 'Arusha (Meru)', 'Monduli', 'Karatu', 'Longido'],
+  'Dodoma': ['Dodoma City', 'Bahi', 'Chamwino', 'Kondoa', 'Mpwapwa'],
+  'Mwanza': ['Nyamagana', 'Ilemela', 'Sengerema', 'Magu', 'Kwimba'],
+  'Mbeya': ['Mbeya City', 'Mbeya Rural', 'Rungwe', 'Kyela', 'Chunya'],
+  'Kilimanjaro': ['Moshi Municipal', 'Moshi Rural', 'Hai', 'Rombo', 'Same'],
+  'Tanga': ['Tanga City', 'Korogwe', 'Muheza', 'Lushoto', 'Pangani'],
+  'Morogoro': ['Morogoro Municipal', 'Kilosa', 'Mvomero', 'Kilombero', 'Ulanga'],
+  'Zanzibar Urban/West': ['Mjini', 'Magharibi A', 'Magharibi B'],
+  'Zanzibar North': ['Kaskazini A', 'Kaskazini B'],
+  'Mtwara': ['Mtwara Municipal', 'Masasi', 'Newala', 'Nanyumbu'],
+  'Iringa': ['Iringa Municipal', 'Kilolo', 'Mufindi', 'Iringa Rural'],
+};
+
+/* Ward/area level -- only populated for districts we're confident giving
+   exhaustive-sounding real data for (Dar es Salaam's 5 districts). Every
+   other district falls back to the free-text City/area field below
+   rather than us guessing at ward names we're not sure of. */
+const TZ_WARDS = {
+  'Ilala': ['Kariakoo', 'Upanga', 'Kivukoni', 'Buguruni', 'Jangwani', 'Kisutu'],
+  'Kinondoni': ['Msasani', 'Mikocheni', 'Sinza', 'Kawe', 'Tandale', 'Magomeni'],
+  'Temeke': ['Mbagala', "Chang'ombe", 'Keko', 'Kurasini', 'Miburani'],
+  'Ubungo': ['Ubungo', 'Kimara', 'Manzese', 'Makuburi', 'Kwembe'],
+  'Kigamboni': ['Kigamboni', 'Vijibweni', 'Kibada'],
+};
+
+/* Mounts a Region / District / (Ward, where we have real data) / City
+   picker into `container`, writing a formatted
+   "City, Ward, District, Region" string into a hidden input with id
+   `hiddenId`. `currentValue` (existing free-text location data) is put
+   into the City/area field as a fallback if it doesn't match a known
+   region -- so old data isn't discarded, just not parsed into the
+   hierarchy. Shared between the seller create-listing form and the
+   listing edit form. */
+function mountLocationPicker(container, hiddenId, currentValue) {
+  const regions = Object.keys(TZ_LOCATIONS);
+  let prefillRegion = '';
+  let prefillDistrict = '';
+  let prefillWard = '';
+  let prefillCity = currentValue || '';
+  const parts = (currentValue || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length) {
+    const matchedRegion = regions.find((r) => parts[parts.length - 1] === r);
+    if (matchedRegion) {
+      prefillRegion = matchedRegion;
+      let rest = parts.slice(0, -1);
+      if (rest.length && TZ_LOCATIONS[matchedRegion].includes(rest[rest.length - 1])) {
+        prefillDistrict = rest[rest.length - 1];
+        rest = rest.slice(0, -1);
+      }
+      if (prefillDistrict && (TZ_WARDS[prefillDistrict] || []).includes(rest[rest.length - 1])) {
+        prefillWard = rest[rest.length - 1];
+        rest = rest.slice(0, -1);
+      }
+      prefillCity = rest.join(', ');
+    }
+  }
+
+  container.innerHTML = `
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <select id="${hiddenId}-region" style="flex:1; min-width:120px;">
+        <option value="">Region&hellip;</option>
+        ${regions.map((r) => `<option value="${escapeHtml(r)}" ${r === prefillRegion ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
+      </select>
+      <select id="${hiddenId}-district" style="flex:1; min-width:120px;">
+        <option value="">District&hellip;</option>
+      </select>
+    </div>
+    <div id="${hiddenId}-ward-wrap" class="hidden" style="margin-top:6px;">
+      <select id="${hiddenId}-ward" style="width:100%;"><option value="">Ward&hellip;</option></select>
+    </div>
+    <input type="text" id="${hiddenId}-city" placeholder="City / area (optional)" value="${escapeHtml(prefillCity)}" style="margin-top:6px;">
+    <input type="hidden" id="${hiddenId}">
+  `;
+
+  const regionSelect = document.getElementById(`${hiddenId}-region`);
+  const districtSelect = document.getElementById(`${hiddenId}-district`);
+  const wardWrap = document.getElementById(`${hiddenId}-ward-wrap`);
+  const wardSelect = document.getElementById(`${hiddenId}-ward`);
+  const cityInput = document.getElementById(`${hiddenId}-city`);
+  const hiddenInput = document.getElementById(hiddenId);
+
+  const populateDistricts = (selected) => {
+    const districts = TZ_LOCATIONS[regionSelect.value] || [];
+    districtSelect.innerHTML = `<option value="">District&hellip;</option>` +
+      districts.map((d) => `<option value="${escapeHtml(d)}" ${d === selected ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('');
+  };
+  const populateWards = (selected) => {
+    const wards = TZ_WARDS[districtSelect.value] || [];
+    if (!wards.length) {
+      wardWrap.classList.add('hidden');
+      wardSelect.innerHTML = `<option value="">Ward&hellip;</option>`;
+      return;
+    }
+    wardWrap.classList.remove('hidden');
+    wardSelect.innerHTML = `<option value="">Ward&hellip;</option>` +
+      wards.map((w) => `<option value="${escapeHtml(w)}" ${w === selected ? 'selected' : ''}>${escapeHtml(w)}</option>`).join('');
+  };
+  populateDistricts(prefillDistrict);
+  populateWards(prefillWard);
+
+  const syncHidden = () => {
+    const bits = [cityInput.value.trim(), wardSelect.value, districtSelect.value, regionSelect.value].filter(Boolean);
+    hiddenInput.value = bits.join(', ');
+  };
+  regionSelect.addEventListener('change', () => { populateDistricts(''); populateWards(''); syncHidden(); });
+  districtSelect.addEventListener('change', () => { populateWards(''); syncHidden(); });
+  wardSelect.addEventListener('change', syncHidden);
+  cityInput.addEventListener('input', syncHidden);
+  syncHidden();
+}
 
 function pillForStatus(status, map) {
   return `<span class="pill ${map[status] || 'pill-draft'}">${escapeHtml((status || '').replace('_', ' '))}</span>`;
@@ -109,6 +254,7 @@ async function renderTab(tab) {
   if (tab === 'bookmarks') return renderBookmarksTab(content);
   if (tab === 'following') return renderFollowingTab(content);
   if (tab === 'withdrawals') return renderWithdrawalsTab(content);
+  if (tab === 'support') return renderSupportTab(content);
 }
 
 async function renderListingsTab(content) {
@@ -131,11 +277,13 @@ async function renderListingsTab(content) {
             ${pillForStatus(l.status, statusMap)}
             <div style="margin-top:8px;">
               ${l.status === 'draft' ? `<button class="btn btn-sm submit-btn" data-slug="${l.slug}">Submit for review</button>` : ''}
+              <button class="btn btn-ghost btn-sm edit-toggle-btn" data-slug="${l.slug}">Edit</button>
               <button class="btn btn-ghost btn-sm media-toggle-btn" data-slug="${l.slug}">Add media</button>
               <a href="listing.html?slug=${encodeURIComponent(l.slug)}" class="btn btn-ghost btn-sm">View</a>
             </div>
           </div>
         </div>
+        <div class="edit-listing-area hidden" id="edit-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);"></div>
         <div class="media-upload-area hidden" id="media-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
           <div id="media-alert-${l.slug}"></div>
           <form class="media-form" data-slug="${l.slug}">
@@ -162,6 +310,16 @@ async function renderListingsTab(content) {
         </div>
       </div>
     `).join('');
+
+    content.querySelectorAll('.edit-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const slug = btn.dataset.slug;
+        const area = document.getElementById(`edit-area-${slug}`);
+        const isHidden = area.classList.contains('hidden');
+        area.classList.toggle('hidden');
+        if (isHidden && !area.dataset.loaded) loadEditForm(slug, area);
+      });
+    });
 
     content.querySelectorAll('.submit-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -223,6 +381,199 @@ async function renderListingsTab(content) {
   }
 }
 
+async function loadEditForm(slug, area) {
+  area.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  try {
+    const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
+    area.dataset.loaded = '1';
+    area.innerHTML = `
+      <div id="edit-alert-${slug}"></div>
+      ${listing.status === 'published' ? `<p class="form-hint">Editing a published listing pulls it back to pending re-review before it's visible to buyers again.</p>` : ''}
+      <form class="edit-listing-form" data-slug="${slug}">
+        <div class="form-group">
+          <label for="edit-title-${slug}">Title</label>
+          <input type="text" id="edit-title-${slug}" value="${escapeHtml(listing.title)}" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-description-${slug}">Short description</label>
+          <textarea id="edit-description-${slug}" style="min-height:50px;" required>${escapeHtml(listing.description)}</textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit-body-${slug}">Full story</label>
+          <textarea id="edit-body-${slug}" style="min-height:120px;" required>${escapeHtml(listing.body)}</textarea>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="edit-byline-${slug}">Byline</label>
+            <input type="text" id="edit-byline-${slug}" value="${escapeHtml(listing.byline || '')}">
+          </div>
+          <div class="form-group">
+            <label for="edit-dateline-${slug}">Dateline</label>
+            <input type="text" id="edit-dateline-${slug}" value="${escapeHtml(listing.dateline || '')}">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="edit-location-${slug}">Location</label>
+            <div id="edit-location-wrap-${slug}"></div>
+          </div>
+          <div class="form-group">
+            <label for="edit-price-${slug}">Price (TZS)</label>
+            <input type="number" id="edit-price-${slug}" min="0" step="1" value="${listing.price}" required>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-sm" id="edit-save-btn-${slug}">Save changes</button>
+        <button type="button" class="btn btn-ghost btn-sm edit-history-toggle" data-slug="${slug}">View edit history</button>
+      </form>
+      <div class="hidden" id="edit-history-${slug}" style="margin-top:12px;"></div>
+    `;
+
+    mountLocationPicker(document.getElementById(`edit-location-wrap-${slug}`), `edit-location-${slug}`, listing.location || '');
+
+    document.querySelector(`.edit-listing-form[data-slug="${slug}"]`).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertBox = document.getElementById(`edit-alert-${slug}`);
+      const btn = document.getElementById(`edit-save-btn-${slug}`);
+      alertBox.innerHTML = '';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Saving&hellip;';
+      try {
+        await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`, {
+          method: 'PATCH',
+          body: {
+            title: document.getElementById(`edit-title-${slug}`).value,
+            description: document.getElementById(`edit-description-${slug}`).value,
+            body: document.getElementById(`edit-body-${slug}`).value,
+            byline: document.getElementById(`edit-byline-${slug}`).value,
+            dateline: document.getElementById(`edit-dateline-${slug}`).value,
+            location: document.getElementById(`edit-location-${slug}`).value,
+            price: document.getElementById(`edit-price-${slug}`).value,
+          },
+        });
+        alertBox.innerHTML = `<div class="alert alert-success">Saved.</div>`;
+        setTimeout(() => renderListingsTab(document.getElementById('tab-content')), 1000);
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        btn.disabled = false;
+        btn.textContent = 'Save changes';
+      }
+    });
+
+    document.querySelector(`.edit-history-toggle[data-slug="${slug}"]`).addEventListener('click', async () => {
+      const histEl = document.getElementById(`edit-history-${slug}`);
+      const isHidden = histEl.classList.contains('hidden');
+      histEl.classList.toggle('hidden');
+      if (!isHidden || histEl.dataset.loaded) return;
+      histEl.dataset.loaded = '1';
+      histEl.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+      try {
+        const revisions = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/revisions/`);
+        histEl.innerHTML = revisions.length ? revisions.map((r) => `
+          <div class="table-row">
+            <span>${escapeHtml(r.snapshot.title || '')}</span>
+            <span class="text-muted">${escapeHtml(r.edited_by || 'unknown')}</span>
+            <span class="text-muted">${timeAgo(r.created_at)}</span>
+          </div>
+        `).join('') : '<p class="text-muted">No prior edits.</p>';
+      } catch (err) {
+        histEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    });
+  } catch (err) {
+    area.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function loadCorporateCard(me) {
+  const card = document.getElementById('corporate-card');
+  if (!card) return;
+  const kybMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected' };
+  try {
+    const data = await apiFetch('/api/accounts/corporate-verifications/');
+    const submissions = data.results || data;
+    const latest = submissions[0];
+
+    card.innerHTML = `
+      <div class="flex-between" style="margin-bottom:4px;">
+        <h4 style="margin:0;">Corporate account</h4>
+        ${me.is_corporate ? '<span class="pill pill-verified">&#10003; Verified organization</span>' : (latest ? pillForStatus(latest.status, kybMap) : '')}
+      </div>
+      <p class="text-muted" style="margin-top:0; font-size:0.85rem;">Buying on behalf of an organization instead of as an individual? Submit your business documents for verification.</p>
+      ${me.is_corporate ? '' : `
+        <div id="corporate-alert"></div>
+        <form id="corporate-form">
+          <div class="form-group">
+            <label for="corp-name">Company name</label>
+            <input type="text" id="corp-name" required>
+          </div>
+          <div class="field-row">
+            <div class="form-group">
+              <label for="corp-license">Business license</label>
+              <input type="file" id="corp-license" required>
+            </div>
+            <div class="form-group">
+              <label for="corp-registration">Company registration certificate</label>
+              <input type="file" id="corp-registration" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="corp-tax">Tax document (optional)</label>
+            <input type="file" id="corp-tax">
+          </div>
+          <button type="submit" class="btn btn-sm" id="corp-submit-btn">Submit for verification</button>
+        </form>
+      `}
+      ${submissions.length ? `
+        <h5 style="margin:16px 0 8px 0;">Submission history</h5>
+        ${submissions.map((s) => `
+          <div class="table-row">
+            <span>${escapeHtml(s.company_name)}</span>
+            <span>${pillForStatus(s.status, kybMap)}</span>
+            <span class="text-muted">${escapeHtml(s.rejection_reason || '')}</span>
+            <span class="text-muted">${timeAgo(s.created_at)}</span>
+          </div>
+        `).join('')}
+      ` : ''}
+    `;
+
+    const form = document.getElementById('corporate-form');
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertBox = document.getElementById('corporate-alert');
+        const btn = document.getElementById('corp-submit-btn');
+        alertBox.innerHTML = '';
+        const license = document.getElementById('corp-license').files[0];
+        const registration = document.getElementById('corp-registration').files[0];
+        const tax = document.getElementById('corp-tax').files[0];
+        if (!license || !registration) {
+          alertBox.innerHTML = `<div class="alert alert-error">Business license and company registration are both required.</div>`;
+          return;
+        }
+        const formData = new FormData();
+        formData.append('company_name', document.getElementById('corp-name').value);
+        formData.append('business_license', license);
+        formData.append('company_registration', registration);
+        if (tax) formData.append('tax_document', tax);
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Submitting&hellip;';
+        try {
+          await apiFetch('/api/accounts/corporate-verifications/', { method: 'POST', body: formData, isForm: true });
+          alertBox.innerHTML = `<div class="alert alert-success">Submitted. A moderator will review it shortly.</div>`;
+          setTimeout(() => loadCorporateCard(me), 1200);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Submit for verification';
+        }
+      });
+    }
+  } catch (err) {
+    card.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
 async function renderVerificationTab(content) {
   content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
   const kycMap = { verified: 'pill-verified', pending: 'pill-pending', awaiting_review: 'pill-pending', rejected: 'pill-rejected', ocr_processing: 'pill-pending' };
@@ -270,10 +621,26 @@ async function renderVerificationTab(content) {
               <label for="kyc-selfie">Selfie (holding your ID, if possible)</label>
               <input type="file" id="kyc-selfie" accept="image/*" required>
             </div>
+            ${me.journalist_tier === 'professional' ? `
+              <div class="form-group">
+                <label for="kyc-press">Press card / media house credential ${me.is_press_credentialed ? '<span class="pill pill-verified">verified</span>' : ''}</label>
+                <input type="file" id="kyc-press" accept="image/*">
+                <p class="form-hint">Optional here, but required for the "Verified Professional Journalist" badge -- attach it with this submission.</p>
+              </div>
+            ` : ''}
             <button type="submit" class="btn" id="kyc-submit-btn">Submit for verification</button>
           </form>
         `}
       </div>
+
+      ${['journalist', 'media_house'].includes(me.role) ? `
+        <div class="card" style="padding:18px 22px; margin-bottom:20px;">
+          <div class="flex-between">
+            <span>Journalist tier: <strong>${escapeHtml((me.journalist_tier || 'none').replace('_', ' '))}</strong></span>
+            ${me.is_press_credentialed ? '<span class="pill pill-verified">&#10003; Verified Professional Journalist</span>' : (me.journalist_tier === 'professional' ? '<span class="pill pill-pending">Press credential pending</span>' : '')}
+          </div>
+        </div>
+      ` : ''}
 
       <h4 style="margin-bottom:10px;">Submission history</h4>
       ${history.length ? history.map((h) => `
@@ -284,6 +651,12 @@ async function renderVerificationTab(content) {
           <span class="text-muted">${timeAgo(h.created_at)}</span>
         </div>
       `).join('') : '<p class="text-muted">No submissions yet.</p>'}
+
+      ${me.role === 'buyer' ? `
+        <div class="card" id="corporate-card" style="padding:22px; margin-top:24px;">
+          <p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
+        </div>
+      ` : ''}
 
       <div class="card" style="padding:22px; margin-top:24px; border-color:#f3cfcc;">
         <h4 style="margin-top:0; color:var(--color-danger);">Danger zone</h4>
@@ -299,6 +672,8 @@ async function renderVerificationTab(content) {
         </div>
       </div>
     `;
+
+    if (me.role === 'buyer') loadCorporateCard(me);
 
     document.getElementById('deactivate-toggle-btn').addEventListener('click', () => {
       document.getElementById('deactivate-form-area').classList.toggle('hidden');
@@ -336,6 +711,8 @@ async function renderVerificationTab(content) {
         formData.append('front_image', front);
         if (back) formData.append('back_image', back);
         formData.append('selfie_image', selfie);
+        const pressInput = document.getElementById('kyc-press');
+        if (pressInput && pressInput.files[0]) formData.append('press_credential_image', pressInput.files[0]);
 
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span> Submitting&hellip;';
@@ -415,8 +792,8 @@ async function renderCreateTab(content) {
         </div>
         <div class="field-row">
           <div class="form-group">
-            <label for="location">Location</label>
-            <input type="text" id="location" placeholder="e.g. Dodoma">
+            <label for="location-wrap">Location</label>
+            <div id="location-wrap"></div>
           </div>
           <div class="form-group">
             <label for="price">Price (TZS)</label>
@@ -428,6 +805,8 @@ async function renderCreateTab(content) {
       </form>
     </div>
   `;
+
+  mountLocationPicker(document.getElementById('location-wrap'), 'location', '');
 
   if (!categories.length) {
     document.getElementById('create-alert').innerHTML = `<div class="alert alert-info">No categories exist yet. An admin needs to create one (via /admin/) before you can publish.</div>`;
@@ -459,6 +838,7 @@ async function renderCreateTab(content) {
       });
       alertBox.innerHTML = `<div class="alert alert-success">Draft created. Switch to "My Listings" to submit it for review.</div>`;
       document.getElementById('create-form').reset();
+      mountLocationPicker(document.getElementById('location-wrap'), 'location', '');
     } catch (err) {
       alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
     } finally {
@@ -559,13 +939,49 @@ async function renderPurchasesTab(content) {
     }
     const statusMap = { paid: 'pill-verified', pending_payment: 'pill-pending', failed: 'pill-rejected', cancelled: 'pill-rejected', refunded: 'pill-draft' };
     content.innerHTML = results.map((o) => `
-      <div class="table-row">
-        <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}">${escapeHtml(o.listing_title)}</a>
-        <span>${money(o.amount, o.currency)}</span>
-        <span>${pillForStatus(o.status, statusMap)}</span>
-        <span class="text-muted">${timeAgo(o.created_at)}</span>
+      <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+        <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" style="font-weight:600;">${escapeHtml(o.listing_title)}</a>
+            <p class="text-muted" style="margin:2px 0 0 0; font-size:0.82rem;">${money(o.amount, o.currency)} &middot; ${pillForStatus(o.status, statusMap)} &middot; ${timeAgo(o.created_at)}</p>
+          </div>
+          ${o.status === 'paid' ? `<button class="btn btn-outline btn-sm refund-request-btn" data-order-id="${o.id}" data-title="${escapeHtml(o.listing_title)}">Request refund</button>` : ''}
+        </div>
+        <div class="refund-form-area hidden" id="refund-form-${o.id}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
       </div>
     `).join('');
+
+    content.querySelectorAll('.refund-request-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const orderId = btn.dataset.orderId;
+        const area = document.getElementById(`refund-form-${orderId}`);
+        if (!area.classList.contains('hidden')) { area.classList.add('hidden'); return; }
+        area.classList.remove('hidden');
+        area.innerHTML = `
+          <div id="refund-alert-${orderId}"></div>
+          <div class="form-group">
+            <label for="refund-reason-${orderId}">Why are you requesting a refund for "${btn.dataset.title}"?</label>
+            <textarea id="refund-reason-${orderId}" style="min-height:60px;" required></textarea>
+          </div>
+          <button class="btn btn-sm" id="refund-submit-${orderId}">Submit refund request</button>
+        `;
+        document.getElementById(`refund-submit-${orderId}`).addEventListener('click', async () => {
+          const alertBox = document.getElementById(`refund-alert-${orderId}`);
+          const reason = document.getElementById(`refund-reason-${orderId}`).value.trim();
+          alertBox.innerHTML = '';
+          if (!reason) {
+            alertBox.innerHTML = `<div class="alert alert-error">Please explain why you're requesting a refund.</div>`;
+            return;
+          }
+          try {
+            await apiFetch('/api/payments/refunds/', { method: 'POST', body: { order: orderId, reason } });
+            area.innerHTML = `<div class="alert alert-success">Refund request submitted. A moderator will review it.</div>`;
+          } catch (err) {
+            alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+          }
+        });
+      });
+    });
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
@@ -726,6 +1142,132 @@ async function renderWithdrawalsTab(content) {
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
+}
+
+async function renderSupportTab(content) {
+  content.innerHTML = `
+    <div class="card" style="padding:20px; margin-bottom:20px;">
+      <h3 style="margin-top:0;">New support request</h3>
+      <div id="ticket-alert"></div>
+      <form id="ticket-form">
+        <div class="field-row">
+          <div class="form-group">
+            <label for="ticket-category">Category</label>
+            <select id="ticket-category">
+              <option value="question">Question</option>
+              <option value="complaint">Complaint</option>
+              <option value="refund_help">Refund help</option>
+              <option value="compliment">Compliment</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="ticket-subject">Subject</label>
+            <input type="text" id="ticket-subject" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="ticket-message">Message</label>
+          <textarea id="ticket-message" style="min-height:70px;" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-sm" id="ticket-submit-btn">Submit</button>
+      </form>
+    </div>
+    <h4 style="margin-bottom:10px;">My tickets</h4>
+    <div id="ticket-list"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+
+  const statusMap = { open: 'pill-pending', in_progress: 'pill-pending', resolved: 'pill-verified', closed: 'pill-draft' };
+
+  const loadTickets = async () => {
+    const listEl = document.getElementById('ticket-list');
+    try {
+      const data = await apiFetch('/api/support-tickets/');
+      const results = data.results || data;
+      if (!results.length) {
+        listEl.innerHTML = `<div class="empty-state"><h3>No tickets yet</h3><p>Questions, complaints, refund help, or compliments -- submit one above.</p></div>`;
+        return;
+      }
+      listEl.innerHTML = results.map((t) => `
+        <div class="card" style="padding:16px 18px; margin-bottom:10px;">
+          <div class="flex-between" style="align-items:flex-start;">
+            <div>
+              <strong>${escapeHtml(t.subject)}</strong>
+              <span class="pill pill-draft" style="margin-left:6px;">${escapeHtml((t.category || '').replace('_', ' '))}</span>
+              ${pillForStatus(t.status, statusMap)}
+              <p class="text-muted" style="margin:6px 0 0 0; font-size:0.85rem;">${escapeHtml(t.message)}</p>
+              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
+            </div>
+          </div>
+          ${(t.messages || []).length ? `
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap:8px;">
+              ${t.messages.map((m) => `
+                <div style="font-size:0.85rem;">
+                  <strong>${m.is_staff_reply ? 'Support' : escapeHtml(m.author_username)}:</strong>
+                  <span>${escapeHtml(m.message)}</span>
+                  <span class="text-muted" style="font-size:0.72rem;"> &middot; ${timeAgo(m.created_at)}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          ${t.status !== 'closed' ? `
+            <div style="margin-top:10px; display:flex; gap:8px;">
+              <input type="text" class="ticket-reply-input" data-id="${t.id}" placeholder="Add a reply&hellip;" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+              <button class="btn btn-sm ticket-reply-btn" data-id="${t.id}">Send</button>
+            </div>
+          ` : ''}
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.ticket-reply-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const input = document.querySelector(`.ticket-reply-input[data-id="${id}"]`);
+          const message = input.value.trim();
+          if (!message) return;
+          btn.disabled = true;
+          try {
+            await apiFetch(`/api/support-tickets/${id}/reply/`, { method: 'POST', body: { message } });
+            loadTickets();
+          } catch (err) {
+            alert(formatApiError(err));
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('ticket-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertBox = document.getElementById('ticket-alert');
+    const btn = document.getElementById('ticket-submit-btn');
+    alertBox.innerHTML = '';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Submitting&hellip;';
+    try {
+      await apiFetch('/api/support-tickets/', {
+        method: 'POST',
+        body: {
+          category: document.getElementById('ticket-category').value,
+          subject: document.getElementById('ticket-subject').value,
+          message: document.getElementById('ticket-message').value,
+        },
+      });
+      document.getElementById('ticket-form').reset();
+      alertBox.innerHTML = `<div class="alert alert-success">Submitted.</div>`;
+      loadTickets();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submit';
+    }
+  });
+
+  loadTickets();
 }
 
 loadMe();
