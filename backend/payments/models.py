@@ -192,3 +192,87 @@ class RefundRequest(BaseModel):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class Subscription(BaseModel):
+    """A buyer's recurring access to everything a given seller publishes
+    -- built on top of the existing Follow relationship's intent, but
+    actually billed. `current_period_end` is the real access gate (see
+    NewsListingDetailSerializer._has_access); `status` is for display/
+    record-keeping. Mobile money in Tanzania is a push-payment model, not
+    stored-card recurring billing, so renewal is a reminder + a fresh
+    manual charge each period (see send_subscription_renewal_reminders),
+    not a silent auto-charge this codebase can't actually confirm Selcom
+    supports."""
+
+    class Status(models.TextChoices):
+        PENDING_PAYMENT = "pending_payment", "Pending payment"
+        ACTIVE = "active", "Active"
+        CANCELLED = "cancelled", "Cancelled (access continues until period end)"
+        EXPIRED = "expired", "Expired"
+
+    subscriber = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="subscriptions")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="subscribers_list")
+    price = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="TZS")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_PAYMENT, db_index=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscriber", "seller"],
+                condition=models.Q(status__in=["pending_payment", "active"]),
+                name="unique_active_subscription_per_pair",
+            )
+        ]
+
+    def is_currently_active(self) -> bool:
+        from django.utils import timezone
+
+        return bool(self.current_period_end and self.current_period_end >= timezone.now())
+
+    def __str__(self):
+        return f"{self.subscriber_id} -> {self.seller_id} [{self.status}]"
+
+
+class SubscriptionTransaction(BaseModel):
+    """One Selcom payment attempt for a Subscription -- mirrors
+    SelcomTransaction's shape so the rest of the system (webhook
+    logging pattern, field names) stays familiar, but kept separate
+    since Subscription isn't an Order (no NewsListing involved)."""
+
+    class Channel(models.TextChoices):
+        MOBILE_MONEY = "mobile_money", "Mobile Money"
+        CARD = "card", "Card"
+        BANK = "bank", "Bank"
+
+    class Status(models.TextChoices):
+        INITIATED = "initiated", "Initiated"
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    subscription = models.ForeignKey(Subscription, on_delete=models.CASCADE, related_name="transactions")
+    selcom_order_id = models.CharField(max_length=100, unique=True)
+    reference = models.CharField(max_length=100, unique=True)
+    channel = models.CharField(max_length=20, choices=Channel.choices)
+    msisdn = models.CharField(max_length=20, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="TZS")
+
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.INITIATED, db_index=True)
+    selcom_transaction_id = models.CharField(max_length=100, blank=True)
+    selcom_resultcode = models.CharField(max_length=20, blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True)
+
+    initiated_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["subscription", "status"])]

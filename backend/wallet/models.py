@@ -68,6 +68,36 @@ class WalletTransaction(BaseModel):
         indexes = [models.Index(fields=["wallet", "entry_type"])]
 
 
+class WalletHold(BaseModel):
+    """
+    Tracks one seller-earning credit that's temporarily excluded from the
+    withdrawable amount -- the payout holding period (Airbnb/Upwork/Etsy
+    pattern) that covers the window a buyer can still file a refund.
+
+    Deliberately layered ON TOP of the existing ledger rather than
+    changing what WalletTransaction.SALE_CREDIT does: `balance` keeps its
+    documented invariant (sum of ledger entries == balance, used for
+    reconciliation) untouched, and `pending_balance` becomes "sum of
+    still-unmatured holds" -- available-for-withdrawal is simply
+    `balance - pending_balance`. Released holds decrement
+    pending_balance; nothing about `balance` or the ledger ever changes.
+    """
+
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name="holds")
+    transaction = models.OneToOneField(WalletTransaction, on_delete=models.CASCADE, related_name="hold")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    matures_at = models.DateTimeField(db_index=True)
+    released = models.BooleanField(default=False, db_index=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["matures_at"]
+        indexes = [models.Index(fields=["wallet", "released"])]
+
+    def __str__(self):
+        return f"Hold of {self.amount} on wallet {self.wallet_id} matures {self.matures_at:%Y-%m-%d %H:%M}"
+
+
 class PayoutAccount(BaseModel):
     """
     A structured, verifiable payout destination -- replaces the previous

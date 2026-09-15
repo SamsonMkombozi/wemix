@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WEMIX — Global News Market</title>
+<meta name="description" content="WEMIX is a verified news marketplace: AI + human-reviewed stories from journalists and media houses, direct from the source.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="WEMIX">
+<meta property="og:title" content="WEMIX — Global News Market">
+<meta property="og:description" content="Verified news, direct from the source. Buy exclusive, fact-checked stories or sell the news you've reported.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="WEMIX — Global News Market">
+<meta name="twitter:description" content="Verified news, direct from the source.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
@@ -402,6 +410,13 @@ function catIconSvg(name) {
   const key = Object.keys(CATEGORY_ICONS).find((k) => k !== 'default' && (name || '').toLowerCase().includes(k));
   return `<svg class="wm-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${CATEGORY_ICONS[key || 'default']}</svg>`;
 }
+
+const rssLink = document.createElement('link');
+rssLink.rel = 'alternate';
+rssLink.type = 'application/rss+xml';
+rssLink.title = 'WEMIX — Latest Verified Stories';
+rssLink.href = `${API_BASE_URL}/feed.xml`;
+document.head.appendChild(rssLink);
 
 document.getElementById('wm-date').textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 document.getElementById('wm-footer-copyright').textContent = `© ${new Date().getFullYear()} WEMIX — Global News Market. All Rights Reserved.`;

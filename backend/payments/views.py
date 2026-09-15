@@ -10,13 +10,14 @@ from rest_framework.views import APIView
 
 from core.permissions import IsModeratorOrAbove
 
-from .models import Order, RefundRequest
+from .models import Order, RefundRequest, Subscription
 from .serializers import (
     CreateOrderSerializer,
     ModeratorOrderSerializer,
     OrderSerializer,
     RefundRequestSerializer,
     RefundReviewSerializer,
+    SubscriptionSerializer,
 )
 from .services import (
     create_nala_collection_and_initiate_payment,
@@ -188,6 +189,98 @@ class NalaWebhookView(APIView):
         verdict, txn = handle_nala_webhook(
             payload=payload, raw_body=request.body, signature_header=signature_header, source_ip=source_ip,
         )
+
+        if verdict == "signature_invalid":
+            return Response({"detail": "Invalid signature."}, status=status.HTTP_401_UNAUTHORIZED)
+        if verdict == "unknown_order":
+            return Response({"detail": "Unknown order; acknowledged."}, status=status.HTTP_200_OK)
+        return Response({"detail": "Processed.", "verdict": verdict}, status=status.HTTP_200_OK)
+
+
+class CreateSubscriptionView(APIView):
+    """POST /api/payments/subscriptions/ {"seller": "<uuid>", "channel":
+    "mobile_money", "msisdn": "..."} -- subscribe (or renew a lapsed/
+    cancelled subscription to the same seller)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from accounts.models import User
+
+        from .subscription_services import create_subscription_and_initiate_payment
+
+        seller_id = request.data.get("seller")
+        seller = get_object_or_404(User, pk=seller_id)
+        subscription, txn, payment_gateway_url = create_subscription_and_initiate_payment(
+            subscriber=request.user, seller=seller,
+            channel=request.data.get("channel", "mobile_money"), msisdn=request.data.get("msisdn", ""),
+        )
+        return Response(
+            {"subscription": SubscriptionSerializer(subscription).data, "payment_gateway_url": payment_gateway_url},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class MySubscriptionsView(generics.ListAPIView):
+    """GET /api/payments/subscriptions/mine/ -- sellers I subscribe to."""
+
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Subscription.objects.filter(subscriber=self.request.user).select_related("seller")
+
+
+class MySubscribersView(generics.ListAPIView):
+    """GET /api/payments/subscribers/mine/ -- seller-facing: who
+    subscribes to me."""
+
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Subscription.objects.filter(seller=self.request.user, status=Subscription.Status.ACTIVE).select_related("subscriber")
+
+
+class SubscriptionCancelView(APIView):
+    """POST /api/payments/subscriptions/<id>/cancel/ -- access continues
+    until current_period_end; no partial refund (matches how most
+    subscription products handle mid-period cancellation)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk=None):
+        from django.utils import timezone
+
+        subscription = get_object_or_404(Subscription, pk=pk, subscriber=request.user)
+        if subscription.status != Subscription.Status.ACTIVE:
+            return Response({"detail": "Only an active subscription can be cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+        subscription.status = Subscription.Status.CANCELLED
+        subscription.cancelled_at = timezone.now()
+        subscription.save(update_fields=["status", "cancelled_at", "updated_at"])
+        return Response(SubscriptionSerializer(subscription).data)
+
+
+class SelcomSubscriptionWebhookView(APIView):
+    """POST /api/payments/webhooks/selcom-subscription/ -- separate from
+    the listing-purchase webhook so this newer path can't regress that
+    one."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "payment_webhook"
+
+    def post(self, request):
+        from .subscription_services import handle_selcom_subscription_webhook
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return Response({"detail": "Invalid JSON body."}, status=status.HTTP_400_BAD_REQUEST)
+
+        source_ip = request.META.get("REMOTE_ADDR")
+        verdict, txn = handle_selcom_subscription_webhook(payload=payload, headers=dict(request.headers), source_ip=source_ip)
 
         if verdict == "signature_invalid":
             return Response({"detail": "Invalid signature."}, status=status.HTTP_401_UNAUTHORIZED)

@@ -20,6 +20,8 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
 
+from news.views import MarketplaceRssFeedView, MarketplaceSitemapView
+
 
 def api_root(request):
     return JsonResponse(
@@ -41,6 +43,8 @@ def api_root(request):
 
 urlpatterns = [
     path("", api_root, name="api-root"),
+    path("sitemap.xml", MarketplaceSitemapView.as_view(), name="sitemap"),
+    path("feed.xml", MarketplaceRssFeedView.as_view(), name="rss-feed"),
     path("admin/", admin.site.urls),
     path("api/accounts/", include("accounts.urls")),
     path("api/news/", include("news.urls")),

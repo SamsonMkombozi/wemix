@@ -1,6 +1,21 @@
 from rest_framework import serializers
 
-from .models import AuditLog, Notification, SupportTicket, SupportTicketMessage, TermsAcceptance
+from .models import APIKey, AuditLog, Notification, SupportTicket, SupportTicketMessage, TermsAcceptance
+
+
+class APIKeySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = APIKey
+        fields = ["id", "name", "prefix", "is_active", "last_used_at", "created_at"]
+        read_only_fields = fields
+
+
+class APIKeyCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+
+    def create(self, validated_data):
+        instance, raw_key = APIKey.create_for_user(self.context["request"].user, validated_data["name"])
+        return {"api_key": instance, "raw_key": raw_key}
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -31,7 +46,7 @@ class TermsAcceptanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = TermsAcceptance
         fields = ["id", "version", "created_at"]
-        read_only_fields = fields
+        read_only_fields = ["id", "created_at"]
 
     def create(self, validated_data):
         request = self.context["request"]

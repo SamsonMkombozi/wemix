@@ -114,6 +114,11 @@ class User(AbstractUser):
                    "document) has been approved -- lets a buyer account represent an organization "
                    "rather than an individual.",
     )
+    subscription_price = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="Monthly price for a buyer to subscribe to all of this seller's stories. "
+                   "Null/blank means this seller doesn't offer subscriptions.",
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]

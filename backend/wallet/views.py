@@ -35,7 +35,10 @@ class MyWalletView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        from .services import release_matured_holds
+
         wallet = get_or_create_user_wallet(request.user)
+        release_matured_holds(wallet)
         transactions = wallet.transactions.order_by("-created_at")[:50]
         return Response(
             {

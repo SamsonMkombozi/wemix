@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from news.models import NewsListing
 
-from .models import Order, RefundRequest, SelcomTransaction
+from .models import Order, RefundRequest, SelcomTransaction, Subscription
 
 
 class SelcomTransactionSerializer(serializers.ModelSerializer):
@@ -161,3 +161,20 @@ class RefundReviewSerializer(serializers.Serializer):
                 )
 
         return refund
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    seller_username = serializers.CharField(source="seller.username", read_only=True)
+    subscriber_username = serializers.CharField(source="subscriber.username", read_only=True)
+    is_currently_active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Subscription
+        fields = [
+            "id", "seller", "seller_username", "subscriber_username", "price", "currency",
+            "status", "current_period_end", "cancelled_at", "is_currently_active", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_is_currently_active(self, obj):
+        return obj.is_currently_active()

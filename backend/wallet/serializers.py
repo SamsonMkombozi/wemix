@@ -12,9 +12,14 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
 
 
 class WalletSerializer(serializers.ModelSerializer):
+    available_balance = serializers.SerializerMethodField()
+
     class Meta:
         model = Wallet
-        fields = ["id", "balance", "pending_balance", "currency", "is_frozen"]
+        fields = ["id", "balance", "pending_balance", "available_balance", "currency", "is_frozen"]
+
+    def get_available_balance(self, obj):
+        return obj.balance - obj.pending_balance
 
 
 class PayoutAccountSerializer(serializers.ModelSerializer):
@@ -115,11 +120,16 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
     def validate_amount(self, value):
         from datetime import timedelta
 
+        from .services import get_available_balance
+
         wallet = self.context["wallet"]
         if value <= 0:
             raise serializers.ValidationError("Withdrawal amount must be positive.")
-        if value > wallet.balance:
-            raise serializers.ValidationError("Withdrawal amount exceeds available wallet balance.")
+        available = get_available_balance(wallet)
+        if value > available:
+            held = wallet.pending_balance
+            hint = f" ({held} still held under the {settings.WALLET_HOLD_PERIOD_HOURS}h payout hold)" if held > 0 else ""
+            raise serializers.ValidationError(f"Withdrawal amount exceeds your available balance of {available}{hint}.")
 
         # Velocity limits: sum this wallet's non-rejected/failed withdrawals
         # over the trailing day/week/month, including this new one, against

@@ -50,6 +50,9 @@ gate.innerHTML = `
         <div class="dash-tab" data-tab="following">Following</div>
         <div class="dash-tab" data-tab="withdrawals">Withdrawals</div>
         <div class="dash-tab" data-tab="support">Support</div>
+        <div class="dash-tab" data-tab="subscriptions">Subscriptions</div>
+        <div class="dash-tab" data-tab="alerts">Alerts</div>
+        <div class="dash-tab" data-tab="developer">Developer</div>
       </div>
       <div id="tab-content"></div>
     </section>
@@ -233,9 +236,11 @@ async function loadWallet() {
   const el = document.getElementById('wallet-card');
   try {
     const data = await apiFetch('/api/wallet/me/');
+    const held = Number(data.wallet.pending_balance);
     el.innerHTML = `
-      <p class="text-muted" style="margin:0 0 4px 0; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em;">Wallet balance</p>
-      <div class="wallet-balance">${Number(data.wallet.balance).toLocaleString()} <span class="wallet-currency">${escapeHtml(data.wallet.currency)}</span></div>
+      <p class="text-muted" style="margin:0 0 4px 0; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em;">Available to withdraw</p>
+      <div class="wallet-balance">${Number(data.wallet.available_balance).toLocaleString()} <span class="wallet-currency">${escapeHtml(data.wallet.currency)}</span></div>
+      ${held > 0 ? `<p class="form-hint">${held.toLocaleString()} ${escapeHtml(data.wallet.currency)} held from recent sales, releases automatically after the payout hold period.</p>` : ''}
       <p class="form-hint">${data.recent_transactions.length} recent transaction(s)</p>
     `;
   } catch (err) {
@@ -255,6 +260,9 @@ async function renderTab(tab) {
   if (tab === 'following') return renderFollowingTab(content);
   if (tab === 'withdrawals') return renderWithdrawalsTab(content);
   if (tab === 'support') return renderSupportTab(content);
+  if (tab === 'subscriptions') return renderSubscriptionsTab(content);
+  if (tab === 'alerts') return renderAlertsTab(content);
+  if (tab === 'developer') return renderDeveloperTab(content);
 }
 
 async function renderListingsTab(content) {
@@ -279,11 +287,27 @@ async function renderListingsTab(content) {
               ${l.status === 'draft' ? `<button class="btn btn-sm submit-btn" data-slug="${l.slug}">Submit for review</button>` : ''}
               <button class="btn btn-ghost btn-sm edit-toggle-btn" data-slug="${l.slug}">Edit</button>
               <button class="btn btn-ghost btn-sm media-toggle-btn" data-slug="${l.slug}">Add media</button>
+              ${l.status === 'published' ? `<button class="btn btn-ghost btn-sm correction-toggle-btn" data-slug="${l.slug}">Issue correction</button>` : ''}
               <a href="listing.html?slug=${encodeURIComponent(l.slug)}" class="btn btn-ghost btn-sm">View</a>
             </div>
           </div>
         </div>
         <div class="edit-listing-area hidden" id="edit-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);"></div>
+        <div class="correction-area hidden" id="correction-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+          <div id="correction-alert-${l.slug}"></div>
+          <div id="correction-history-${l.slug}"></div>
+          <form class="correction-form" data-slug="${l.slug}">
+            <div class="form-group">
+              <label for="correction-text-${l.slug}">Correction text (visible to everyone, and emailed to every past buyer)</label>
+              <textarea id="correction-text-${l.slug}" style="min-height:60px;" required></textarea>
+            </div>
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+              <input type="checkbox" id="correction-retraction-${l.slug}" style="width:auto;">
+              This is a retraction (the story is materially wrong, not just amended)
+            </label>
+            <button type="submit" class="btn btn-sm">Post correction</button>
+          </form>
+        </div>
         <div class="media-upload-area hidden" id="media-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
           <div id="media-alert-${l.slug}"></div>
           <form class="media-form" data-slug="${l.slug}">
@@ -305,6 +329,29 @@ async function renderListingsTab(content) {
               <input type="checkbox" id="media-cover-${l.slug}" checked style="width:auto;">
               Use as cover image
             </label>
+            <details style="margin-bottom:12px;">
+              <summary style="cursor:pointer; font-size:0.82rem; color:var(--color-text-muted);">Wire metadata (optional)</summary>
+              <div class="field-row" style="margin-top:10px;">
+                <div class="form-group">
+                  <label for="media-credit-${l.slug}">Credit line</label>
+                  <input type="text" id="media-credit-${l.slug}" placeholder="Photo: Jane Reporter / WEMIX">
+                </div>
+                <div class="form-group">
+                  <label for="media-keywords-${l.slug}">Keywords</label>
+                  <input type="text" id="media-keywords-${l.slug}" placeholder="comma, separated, keywords">
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="form-group">
+                  <label for="media-capture-date-${l.slug}">Capture date</label>
+                  <input type="datetime-local" id="media-capture-date-${l.slug}">
+                </div>
+                <div class="form-group">
+                  <label for="media-gps-${l.slug}">GPS (lat, lng)</label>
+                  <input type="text" id="media-gps-${l.slug}" placeholder="-6.792354, 39.208328">
+                </div>
+              </div>
+            </details>
             <button type="submit" class="btn btn-sm">Upload</button>
           </form>
         </div>
@@ -318,6 +365,44 @@ async function renderListingsTab(content) {
         const isHidden = area.classList.contains('hidden');
         area.classList.toggle('hidden');
         if (isHidden && !area.dataset.loaded) loadEditForm(slug, area);
+      });
+    });
+
+    content.querySelectorAll('.correction-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const slug = btn.dataset.slug;
+        const area = document.getElementById(`correction-area-${slug}`);
+        const isHidden = area.classList.contains('hidden');
+        area.classList.toggle('hidden');
+        if (isHidden && !area.dataset.loaded) loadCorrectionHistory(slug, area);
+      });
+    });
+    content.querySelectorAll('.correction-form').forEach((form) => {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const slug = form.dataset.slug;
+        const alertBox = document.getElementById(`correction-alert-${slug}`);
+        alertBox.innerHTML = '';
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        try {
+          await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/corrections/`, {
+            method: 'POST',
+            body: {
+              text: document.getElementById(`correction-text-${slug}`).value,
+              is_retraction: document.getElementById(`correction-retraction-${slug}`).checked,
+            },
+          });
+          alertBox.innerHTML = `<div class="alert alert-success">Posted, and past buyers have been notified.</div>`;
+          form.reset();
+          const area = document.getElementById(`correction-area-${slug}`);
+          area.dataset.loaded = '';
+          loadCorrectionHistory(slug, area);
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        } finally {
+          submitBtn.disabled = false;
+        }
       });
     });
 
@@ -361,6 +446,19 @@ async function renderListingsTab(content) {
         formData.append('file', fileInput.files[0]);
         formData.append('is_cover', document.getElementById(`media-cover-${slug}`).checked);
 
+        const creditLine = document.getElementById(`media-credit-${slug}`).value.trim();
+        if (creditLine) formData.append('credit_line', creditLine);
+        const keywords = document.getElementById(`media-keywords-${slug}`).value.trim();
+        if (keywords) formData.append('keywords', keywords);
+        const captureDate = document.getElementById(`media-capture-date-${slug}`).value;
+        if (captureDate) formData.append('capture_date', captureDate);
+        const gps = document.getElementById(`media-gps-${slug}`).value.trim();
+        if (gps && gps.includes(',')) {
+          const [lat, lng] = gps.split(',').map((s) => s.trim());
+          if (lat) formData.append('gps_latitude', lat);
+          if (lng) formData.append('gps_longitude', lng);
+        }
+
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<span class="spinner"></span> Uploading&hellip;';
         try {
@@ -378,6 +476,23 @@ async function renderListingsTab(content) {
     });
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+async function loadCorrectionHistory(slug, area) {
+  const historyEl = document.getElementById(`correction-history-${slug}`);
+  area.dataset.loaded = '1';
+  historyEl.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  try {
+    const corrections = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/corrections/`, { auth: false });
+    historyEl.innerHTML = corrections.length ? corrections.map((c) => `
+      <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:8px;">
+        <strong>${c.is_retraction ? 'Retraction' : 'Correction'} &middot; ${timeAgo(c.created_at)}</strong>
+        <p style="margin:4px 0 0 0;">${escapeHtml(c.text)}</p>
+      </div>
+    `).join('') : '<p class="text-muted" style="font-size:0.85rem;">No corrections issued yet.</p>';
+  } catch (err) {
+    historyEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
   }
 }
 
@@ -800,6 +915,20 @@ async function renderCreateTab(content) {
             <input type="number" id="price" min="0" step="1" required>
           </div>
         </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="license-type">License</label>
+            <select id="license-type">
+              <option value="standard">Standard (non-exclusive, digital use)</option>
+              <option value="exclusive">Exclusive (one buyer only -- listing is withdrawn from sale after purchase)</option>
+              <option value="broadcast">Includes broadcast rights (non-exclusive)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="license-territory">Territory</label>
+            <input type="text" id="license-territory" value="Worldwide" placeholder="e.g. Worldwide, Tanzania only, East Africa">
+          </div>
+        </div>
         <button type="submit" class="btn" id="create-btn">Save as draft</button>
         <p class="form-hint">After saving, submit it for AI/moderation review from the "My Listings" tab.</p>
       </form>
@@ -834,6 +963,8 @@ async function renderCreateTab(content) {
           category: document.getElementById('category').value,
           location: document.getElementById('location').value,
           price: document.getElementById('price').value,
+          license_type: document.getElementById('license-type').value,
+          license_territory: document.getElementById('license-territory').value,
         },
       });
       alertBox.innerHTML = `<div class="alert alert-success">Draft created. Switch to "My Listings" to submit it for review.</div>`;
@@ -1044,7 +1175,7 @@ async function renderWithdrawalsTab(content) {
 
       <div class="card" style="padding:22px; margin-bottom:20px;">
         <h3 style="margin-top:0;">Request a withdrawal</h3>
-        <p class="text-muted" style="margin-top:-8px;">Available balance: <strong>${money(walletData.wallet.balance, walletData.wallet.currency)}</strong></p>
+        <p class="text-muted" style="margin-top:-8px;">Available balance: <strong>${money(walletData.wallet.available_balance, walletData.wallet.currency)}</strong>${Number(walletData.wallet.pending_balance) > 0 ? ` <span class="text-muted">(${money(walletData.wallet.pending_balance, walletData.wallet.currency)} held from recent sales)</span>` : ''}</p>
         <div id="withdraw-alert"></div>
         ${verifiedAccounts.length ? `
           <form id="withdraw-form">
@@ -1268,6 +1399,309 @@ async function renderSupportTab(content) {
   });
 
   loadTickets();
+}
+
+/* ---------------------------------------------------------------------- */
+/* SUBSCRIPTIONS tab                                                       */
+/* ---------------------------------------------------------------------- */
+
+async function renderSubscriptionsTab(content) {
+  content.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+  const statusMap = { pending_payment: 'pill-pending', active: 'pill-verified', cancelled: 'pill-draft', expired: 'pill-rejected' };
+
+  try {
+    const me = await apiFetch('/api/accounts/me/');
+    const isSeller = ['seller', 'journalist', 'media_house'].includes(me.role);
+
+    const [mineResp, subscribersResp] = await Promise.all([
+      apiFetch('/api/payments/subscriptions/mine/'),
+      isSeller ? apiFetch('/api/payments/subscribers/mine/') : Promise.resolve({ results: [] }),
+    ]);
+    const mine = mineResp.results || mineResp;
+    const subscribers = subscribersResp.results || subscribersResp;
+
+    content.innerHTML = `
+      ${isSeller ? `
+        <div class="card" style="padding:20px; margin-bottom:20px;">
+          <h3 style="margin-top:0;">Offer subscriptions</h3>
+          <p class="text-muted" style="margin-top:-8px;">Set a monthly price and buyers can subscribe to unlock everything you publish, instead of buying each story one at a time.</p>
+          <div id="sub-price-alert"></div>
+          <div class="field-row">
+            <div class="form-group">
+              <label for="sub-price-input">Monthly price (TZS) &mdash; leave blank to disable</label>
+              <input type="number" id="sub-price-input" min="0" step="1" value="${me.subscription_price != null ? me.subscription_price : ''}">
+            </div>
+          </div>
+          <button class="btn btn-sm" id="sub-price-save">Save</button>
+          <h4 style="margin-top:24px; margin-bottom:10px;">My subscribers (${subscribers.length})</h4>
+          ${subscribers.length ? subscribers.map((s) => `
+            <div class="table-row">
+              <span>${escapeHtml(s.subscriber_username)}</span>
+              <span>${money(s.price)}</span>
+              <span>${pillForStatus(s.status, statusMap)}</span>
+              <span class="text-muted">until ${s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : ''}</span>
+            </div>
+          `).join('') : '<p class="text-muted">No subscribers yet.</p>'}
+        </div>
+      ` : ''}
+
+      <h4 style="margin-bottom:10px;">Sellers I'm subscribed to</h4>
+      <div id="my-subs-list">
+        ${mine.length ? mine.map((s) => `
+          <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+            <div class="flex-between">
+              <div>
+                <strong>${escapeHtml(s.seller_username)}</strong> &middot; ${money(s.price)}/mo
+                <p class="text-muted" style="margin:4px 0 0 0; font-size:0.82rem;">${pillForStatus(s.status, statusMap)} ${s.current_period_end ? '&middot; renews/ends ' + new Date(s.current_period_end).toLocaleDateString() : ''}</p>
+              </div>
+              ${s.status === 'active' ? `<button class="btn btn-outline btn-sm sub-cancel-btn" data-id="${s.id}">Cancel</button>` : ''}
+            </div>
+          </div>
+        `).join('') : '<p class="text-muted">Not subscribed to anyone yet -- subscribe from a seller\'s listing page.</p>'}
+      </div>
+    `;
+
+    if (isSeller) {
+      document.getElementById('sub-price-save').addEventListener('click', async () => {
+        const alertBox = document.getElementById('sub-price-alert');
+        alertBox.innerHTML = '';
+        const val = document.getElementById('sub-price-input').value;
+        try {
+          await apiFetch('/api/accounts/me/', { method: 'PATCH', body: { subscription_price: val || null } });
+          alertBox.innerHTML = `<div class="alert alert-success">Saved.</div>`;
+        } catch (err) {
+          alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+        }
+      });
+    }
+
+    content.querySelectorAll('.sub-cancel-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Cancel this subscription? You\'ll keep access until the current period ends.')) return;
+        try {
+          await apiFetch(`/api/payments/subscriptions/${btn.dataset.id}/cancel/`, { method: 'POST' });
+          renderSubscriptionsTab(content);
+        } catch (err) {
+          alert(formatApiError(err));
+        }
+      });
+    });
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* ALERTS (saved searches) tab                                             */
+/* ---------------------------------------------------------------------- */
+
+async function renderAlertsTab(content) {
+  content.innerHTML = `
+    <div class="card" style="padding:20px; margin-bottom:20px;">
+      <h3 style="margin-top:0;">New alert</h3>
+      <p class="text-muted" style="margin-top:-8px;">Get notified the moment a new verified story matches your filter.</p>
+      <div id="alert-create-alert"></div>
+      <form id="alert-create-form">
+        <div class="field-row">
+          <div class="form-group">
+            <label for="alert-name">Label</label>
+            <input type="text" id="alert-name" placeholder="e.g. Dar es Salaam politics">
+          </div>
+          <div class="form-group">
+            <label for="alert-news-type">Type</label>
+            <select id="alert-news-type">
+              <option value="">Any</option>
+              <option value="text">Text News</option>
+              <option value="breaking">Breaking News</option>
+              <option value="investigative">Investigative Report</option>
+              <option value="political">Political</option>
+              <option value="business">Business</option>
+              <option value="sports">Sports</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="alert-location">Location contains</label>
+            <input type="text" id="alert-location" placeholder="e.g. Dar es Salaam">
+          </div>
+          <div class="form-group">
+            <label for="alert-max-price">Max price (TZS)</label>
+            <input type="number" id="alert-max-price" min="0">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-sm">Create alert</button>
+      </form>
+    </div>
+    <h4 style="margin-bottom:10px;">My alerts</h4>
+    <div id="alert-list"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+
+  const load = async () => {
+    const listEl = document.getElementById('alert-list');
+    try {
+      const data = await apiFetch('/api/news/saved-searches/');
+      const results = data.results || data;
+      listEl.innerHTML = results.length ? results.map((a) => `
+        <div class="table-row">
+          <span>${escapeHtml(a.name || 'Untitled alert')}</span>
+          <span class="text-muted">${escapeHtml((a.news_type || 'any type').replace('_', ' '))}${a.location_contains ? ' &middot; ' + escapeHtml(a.location_contains) : ''}</span>
+          <span>${a.is_active ? '<span class="pill pill-verified">active</span>' : '<span class="pill pill-draft">paused</span>'}</span>
+          <span><button class="btn btn-ghost btn-sm alert-delete-btn" data-id="${a.id}">Delete</button></span>
+        </div>
+      `).join('') : '<p class="text-muted">No alerts yet.</p>';
+
+      listEl.querySelectorAll('.alert-delete-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiFetch(`/api/news/saved-searches/${btn.dataset.id}/`, { method: 'DELETE' });
+            load();
+          } catch (err) {
+            alert(formatApiError(err));
+          }
+        });
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('alert-create-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertBox = document.getElementById('alert-create-alert');
+    alertBox.innerHTML = '';
+    try {
+      await apiFetch('/api/news/saved-searches/', {
+        method: 'POST',
+        body: {
+          name: document.getElementById('alert-name').value,
+          news_type: document.getElementById('alert-news-type').value,
+          location_contains: document.getElementById('alert-location').value,
+          max_price: document.getElementById('alert-max-price').value || null,
+        },
+      });
+      document.getElementById('alert-create-form').reset();
+      load();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  });
+
+  load();
+}
+
+/* ---------------------------------------------------------------------- */
+/* DEVELOPER (API keys + data export) tab                                  */
+/* ---------------------------------------------------------------------- */
+
+async function renderDeveloperTab(content) {
+  content.innerHTML = `
+    <div class="card" style="padding:20px; margin-bottom:20px;">
+      <h3 style="margin-top:0;">Your data</h3>
+      <p class="text-muted" style="margin-top:-8px;">Download everything WEMIX has on your account -- profile, listings, orders, wallet history, and more -- as a JSON file.</p>
+      <button class="btn btn-outline btn-sm" id="export-data-btn">Export my data</button>
+    </div>
+    <div class="card" style="padding:20px;">
+      <h3 style="margin-top:0;">API keys</h3>
+      <p class="text-muted" style="margin-top:-8px;">For enterprise/newsroom integrations that need programmatic access instead of a browser login. Send it as <code>Authorization: Api-Key &lt;key&gt;</code>.</p>
+      <div id="apikey-alert"></div>
+      <div class="field-row">
+        <div class="form-group">
+          <label for="apikey-name">Label</label>
+          <input type="text" id="apikey-name" placeholder="e.g. Newsroom ingest script">
+        </div>
+      </div>
+      <button class="btn btn-sm" id="apikey-create-btn">Generate new key</button>
+      <div id="apikey-new-value" style="margin-top:12px;"></div>
+      <h4 style="margin-top:20px; margin-bottom:10px;">Your keys</h4>
+      <div id="apikey-list"></div>
+    </div>
+  `;
+
+  document.getElementById('export-data-btn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/accounts/me/export/`, {
+        headers: { Authorization: `Bearer ${Auth.getAccessToken()}` },
+      });
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'wemix-data-export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Export failed.');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  const loadKeys = async () => {
+    const listEl = document.getElementById('apikey-list');
+    try {
+      const keys = await apiFetch('/api/api-keys/');
+      listEl.innerHTML = keys.length ? keys.map((k) => `
+        <div class="table-row">
+          <span>${escapeHtml(k.name)}</span>
+          <span class="text-muted">${escapeHtml(k.prefix)}&hellip;</span>
+          <span>${k.is_active ? '<span class="pill pill-verified">active</span>' : '<span class="pill pill-draft">revoked</span>'}</span>
+          <span>${k.is_active ? `<button class="btn btn-ghost btn-sm apikey-revoke-btn" data-id="${k.id}">Revoke</button>` : ''}</span>
+        </div>
+      `).join('') : '<p class="text-muted">No API keys yet.</p>';
+
+      listEl.querySelectorAll('.apikey-revoke-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Revoke this key? Anything using it will stop working immediately.')) return;
+          try {
+            await apiFetch(`/api/api-keys/${btn.dataset.id}/revoke/`, { method: 'POST' });
+            loadKeys();
+          } catch (err) {
+            alert(formatApiError(err));
+          }
+        });
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('apikey-create-btn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('apikey-alert');
+    alertBox.innerHTML = '';
+    const name = document.getElementById('apikey-name').value.trim();
+    if (!name) {
+      alertBox.innerHTML = `<div class="alert alert-error">Give the key a label first.</div>`;
+      return;
+    }
+    try {
+      const result = await apiFetch('/api/api-keys/', { method: 'POST', body: { name } });
+      document.getElementById('apikey-new-value').innerHTML = `
+        <div class="alert alert-success">
+          <strong>Copy this now -- it won't be shown again:</strong>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+            <input type="text" readonly value="${escapeHtml(result.raw_key)}" style="flex:1; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="apikey-raw-input">
+            <button class="btn btn-sm" id="apikey-copy-btn">Copy</button>
+          </div>
+        </div>
+      `;
+      document.getElementById('apikey-copy-btn').addEventListener('click', () => {
+        const input = document.getElementById('apikey-raw-input');
+        input.select();
+        navigator.clipboard?.writeText(input.value).catch(() => document.execCommand('copy'));
+      });
+      document.getElementById('apikey-name').value = '';
+      loadKeys();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  });
+
+  loadKeys();
 }
 
 loadMe();

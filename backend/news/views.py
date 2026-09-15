@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from core.models import AuditLog
 from core.permissions import IsAdminOrAbove, IsListingOwner, IsModeratorOrAbove, IsVerifiedSeller
 
-from .models import AIVerificationResult, Bookmark, Category, Follow, ListingView, NewsListing, NewsMedia, Tag
+from .models import AIVerificationResult, Bookmark, Category, Follow, ListingView, NewsListing, NewsMedia, SavedSearch, Tag
 from .services import MEDIA_DOWNLOAD_TOKEN_MAX_AGE, make_media_download_token
 from .serializers import (
     AIVerificationResultSerializer,
@@ -24,6 +24,7 @@ from .serializers import (
     NewsMediaSerializer,
     ReviewCreateSerializer,
     ReviewSerializer,
+    SavedSearchSerializer,
     SubmitForReviewSerializer,
     TagSerializer,
 )
@@ -65,7 +66,7 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             return [permissions.AllowAny()]
         if self.action == "create":
             return [permissions.IsAuthenticated(), IsVerifiedSeller()]
-        if self.action == "reviews":
+        if self.action in {"reviews", "corrections"}:
             if self.request.method == "GET":
                 return [permissions.AllowAny()]
             return [permissions.IsAuthenticated()]
@@ -291,43 +292,20 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        from .ai_verification import run_ai_verification
-        from .services import log_news_action
-        from moderation.circumvention_scanner import scan_listing
+        from .tasks import process_listing_submission_task
 
-        ai_result = run_ai_verification(listing)
-        listing.refresh_from_db()
-        log_news_action(
-            actor=request.user, action=AuditLog.Action.UPDATE, listing=listing,
-            description=f"AI verification ran: outcome={ai_result.outcome}, fake_news_score={ai_result.fake_news_score}.",
-            request=request,
+        # In the default eager mode (no Celery broker configured) this
+        # runs synchronously right here, so `listing` already reflects
+        # the AI outcome by the time we serialize it below -- identical
+        # to the old inline call. With a real broker, this returns
+        # immediately and the response reflects "still pending" instead;
+        # a caller wanting the final outcome polls ai-results/ or waits
+        # for the Notification, same as a real async system requires.
+        process_listing_submission_task.delay(
+            str(listing.id), str(request.user.id),
+            request.META.get("REMOTE_ADDR"), request.META.get("HTTP_USER_AGENT", "")[:512],
         )
-
-        circumvention_flags = scan_listing(listing)
-        if circumvention_flags:
-            log_news_action(
-                actor=request.user, action=AuditLog.Action.FLAG, listing=listing,
-                description=f"Anti-circumvention scan found {len(circumvention_flags)} issue(s): "
-                            f"{', '.join(f.detected_pattern for f in circumvention_flags)}.",
-                request=request,
-            )
-            from moderation.circumvention_scanner import HIGH_CONFIDENCE_PATTERNS
-
-            # Any unambiguous contact-info match (phone/email/WhatsApp/
-            # Telegram) means the listing itself still contains prohibited
-            # content -- pull it back from auto-publish regardless of how
-            # leniently the *user* was treated (first offense = only a
-            # warning to the account, but the content still can't go live
-            # as-is). Fuzzy off-platform-language-only matches are left to
-            # the AI verification outcome since those carry more
-            # false-positive risk.
-            has_high_confidence_match = any(
-                f.detected_pattern in HIGH_CONFIDENCE_PATTERNS for f in circumvention_flags
-            )
-            if has_high_confidence_match:
-                listing.status = NewsListing.ListingStatus.SUBMITTED
-                listing.verification_status = NewsListing.VerificationStatus.NEEDS_HUMAN_REVIEW
-                listing.save(update_fields=["status", "verification_status", "updated_at"])
+        listing.refresh_from_db()
 
         return Response(NewsListingDetailSerializer(listing, context={"request": request}).data)
 
@@ -338,27 +316,12 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         media_obj = serializer.save()
 
-        from .image_analysis import run_image_analysis
+        from .tasks import process_media_upload_task
 
-        analysis = run_image_analysis(media_obj)
-        if analysis.flagged and listing.status == NewsListing.ListingStatus.PUBLISHED:
-            # A newly-uploaded image on an already-live listing came back
-            # flagged (manipulation signal, no/edited metadata, or a
-            # duplicate match) -- pull it back for human review rather
-            # than leaving suspect media on a published, purchasable
-            # listing.
-            listing.status = NewsListing.ListingStatus.SUBMITTED
-            listing.verification_status = NewsListing.VerificationStatus.NEEDS_HUMAN_REVIEW
-            listing.save(update_fields=["status", "verification_status", "updated_at"])
-
-            from .services import log_news_action
-            log_news_action(
-                actor=request.user, action=AuditLog.Action.FLAG, listing=listing,
-                description=f"Image analysis flagged newly uploaded media (manipulation_score="
-                            f"{analysis.manipulation_score}, duplicate_matches={len(analysis.reverse_image_matches)}); "
-                            f"listing pulled back for review.",
-                request=request,
-            )
+        process_media_upload_task.delay(
+            str(media_obj.id), str(request.user.id),
+            request.META.get("REMOTE_ADDR"), request.META.get("HTTP_USER_AGENT", "")[:512],
+        )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -506,6 +469,60 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             )
         return Response({"detail": f"Listing '{title}' permanently deleted.", "id": str(listing_id)})
 
+    @action(detail=True, methods=["get", "post"])
+    def corrections(self, request, slug=None):
+        """GET (public): a listing's correction/retraction history --
+        visible to anyone, including someone who bought it before a
+        correction was posted. POST (owner or staff only): add one, and
+        notify every past buyer so the correction doesn't just sit
+        silently on the page."""
+        from .models import Correction
+        from .serializers import CorrectionCreateSerializer, CorrectionSerializer
+
+        listing = self.get_object()
+
+        if request.method == "GET":
+            results = listing.corrections.select_related("created_by").order_by("-created_at")
+            return Response(CorrectionSerializer(results, many=True).data)
+
+        user = request.user
+        is_owner_or_staff = listing.seller_id == user.id or (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        if not is_owner_or_staff:
+            return Response({"detail": "Only the seller or a moderator can post a correction."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = CorrectionCreateSerializer(data=request.data, context={"listing": listing, "request": request})
+        serializer.is_valid(raise_exception=True)
+        correction = serializer.save()
+
+        from payments.models import Order
+
+        from core.models import Notification
+        from core.notifications import send_notification
+
+        buyer_orders = Order.objects.filter(listing=listing, status=Order.Status.PAID).select_related("buyer")
+        label = "Retraction" if correction.is_retraction else "Correction"
+        notified_buyer_ids = set()
+        for order in buyer_orders:
+            if order.buyer_id in notified_buyer_ids:
+                continue
+            notified_buyer_ids.add(order.buyer_id)
+            send_notification(
+                user=order.buyer, notification_type=Notification.NotificationType.MODERATION_ACTION,
+                title=f"{label} issued for '{listing.title}'",
+                message=correction.text[:200],
+                link_path=f"listing.html?slug={listing.slug}",
+            )
+
+        from .services import log_news_action
+
+        log_news_action(
+            actor=user, action=AuditLog.Action.UPDATE, listing=listing,
+            description=f"{label} posted: {correction.text[:200]}", request=request,
+        )
+        return Response(CorrectionSerializer(correction).data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=["post"], url_path="social-share")
     def social_share(self, request, slug=None):
         """POST /api/news/listings/<slug>/social-share/ {"provider": "..."}
@@ -645,6 +662,27 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
 
 
+class SavedSearchListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/news/saved-searches/ -- the current user's own
+    standing alert filters."""
+
+    serializer_class = SavedSearchSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return SavedSearch.objects.filter(user=self.request.user)
+
+
+class SavedSearchDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PATCH/DELETE /api/news/saved-searches/<id>/"""
+
+    serializer_class = SavedSearchSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return SavedSearch.objects.filter(user=self.request.user)
+
+
 class BookmarkListView(generics.ListAPIView):
     """GET /api/news/bookmarks/ -- the current user's bookmarked listings, most recently saved first."""
 
@@ -691,6 +729,81 @@ class FollowToggleView(APIView):
             follow.delete()
             return Response({"is_following": False})
         return Response({"is_following": True})
+
+
+class MarketplaceSitemapView(APIView):
+    """GET /sitemap.xml -- public. Lists the homepage plus every publicly
+    visible (published + AI-cleared) listing page, pointing at the
+    FRONTEND (not this API) since that's what search engines should
+    actually crawl. No prior sitemap existed at all."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from django.conf import settings
+        from django.http import HttpResponse
+
+        base = settings.FRONTEND_BASE_URL.rstrip("/")
+        listings = NewsListing.objects.filter(
+            status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status__in=[NewsListing.VerificationStatus.VERIFIED, NewsListing.VerificationStatus.PARTIALLY_VERIFIED],
+        ).order_by("-created_at").only("slug", "updated_at")[:5000]
+
+        urls = [f"{base}/index.html", f"{base}/login.html", f"{base}/register.html", f"{base}/terms.html"]
+        entries = [f"<url><loc>{u}</loc></url>" for u in urls]
+        entries += [
+            f"<url><loc>{base}/listing.html?slug={l.slug}</loc><lastmod>{l.updated_at.date().isoformat()}</lastmod></url>"
+            for l in listings
+        ]
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            + "\n".join(entries) + "\n</urlset>"
+        )
+        return HttpResponse(xml, content_type="application/xml")
+
+
+class MarketplaceRssFeedView(APIView):
+    """GET /feed.xml -- public RSS 2.0 feed of the latest published,
+    verified listings. Lets syndication partners and power users consume
+    'latest verified stories' without a browser -- didn't exist before."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from django.conf import settings
+        from django.http import HttpResponse
+        from django.utils.http import http_date
+
+        base = settings.FRONTEND_BASE_URL.rstrip("/")
+        listings = NewsListing.objects.filter(
+            status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status__in=[NewsListing.VerificationStatus.VERIFIED, NewsListing.VerificationStatus.PARTIALLY_VERIFIED],
+        ).select_related("seller").order_by("-created_at")[:50]
+
+        def esc(s):
+            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        items = []
+        for l in listings:
+            link = f"{base}/listing.html?slug={l.slug}"
+            items.append(
+                f"<item><title>{esc(l.title)}</title><link>{link}</link><guid>{link}</guid>"
+                f"<description>{esc(l.description)}</description>"
+                f"<author>{esc(l.seller.username)}</author>"
+                f"<pubDate>{http_date(l.created_at.timestamp())}</pubDate></item>"
+            )
+
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0"><channel>'
+            "<title>WEMIX — Global News Market</title>"
+            f"<link>{base}/index.html</link>"
+            "<description>Latest verified, published stories on WEMIX.</description>"
+            + "".join(items) +
+            "</channel></rss>"
+        )
+        return HttpResponse(xml, content_type="application/rss+xml")
 
 
 class MediaDownloadByTokenView(APIView):

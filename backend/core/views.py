@@ -4,9 +4,11 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import AuditLog, Notification, SupportTicket, TermsAcceptance
+from .models import APIKey, AuditLog, Notification, SupportTicket, TermsAcceptance
 from .permissions import IsAdminOrAbove, IsModeratorOrAbove
 from .serializers import (
+    APIKeyCreateSerializer,
+    APIKeySerializer,
     AuditLogSerializer,
     NotificationSerializer,
     SupportTicketReplySerializer,
@@ -288,6 +290,41 @@ class SupportTicketReplyView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(SupportTicketSerializer(ticket).data)
+
+
+class APIKeyListCreateView(APIView):
+    """GET /api/api-keys/ -- the current user's own keys (never their raw
+    values -- only shown once, at creation). POST {"name": "..."} creates
+    one and returns the raw key in that single response only."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        keys = APIKey.objects.filter(user=request.user)
+        return Response(APIKeySerializer(keys, many=True).data)
+
+    def post(self, request):
+        serializer = APIKeyCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        data = APIKeySerializer(result["api_key"]).data
+        data["raw_key"] = result["raw_key"]
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class APIKeyRevokeView(APIView):
+    """POST /api/api-keys/<id>/revoke/ -- deactivates a key permanently
+    (soft, so the audit trail of a key having existed isn't lost)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk=None):
+        from django.shortcuts import get_object_or_404
+
+        api_key = get_object_or_404(APIKey, pk=pk, user=request.user)
+        api_key.is_active = False
+        api_key.save(update_fields=["is_active", "updated_at"])
+        return Response(APIKeySerializer(api_key).data)
 
 
 class AuditLogListView(generics.ListAPIView):

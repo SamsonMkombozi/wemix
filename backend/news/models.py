@@ -67,6 +67,11 @@ class NewsListing(BaseModel):
         REMOVED = "removed", "Removed"
         SOLD_OUT = "sold_out", "Sold out"
 
+    class LicenseType(models.TextChoices):
+        STANDARD = "standard", "Standard (non-exclusive, digital use)"
+        EXCLUSIVE = "exclusive", "Exclusive (only one buyer -- listing is withdrawn from sale after purchase)"
+        BROADCAST = "broadcast", "Includes broadcast rights (non-exclusive)"
+
     seller = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="news_listings"
     )
@@ -82,6 +87,11 @@ class NewsListing(BaseModel):
 
     price = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3, default="TZS")
+    license_type = models.CharField(max_length=20, choices=LicenseType.choices, default=LicenseType.STANDARD)
+    license_territory = models.CharField(
+        max_length=100, default="Worldwide", blank=True,
+        help_text="Where the buyer's usage rights apply, e.g. 'Worldwide', 'Tanzania only', 'East Africa'.",
+    )
 
     verification_status = models.CharField(
         max_length=25, choices=VerificationStatus.choices, default=VerificationStatus.PENDING, db_index=True
@@ -193,6 +203,20 @@ class NewsMedia(BaseModel):
     preview_file = models.FileField(upload_to=news_media_upload_path, blank=True, null=True)
     is_cover = models.BooleanField(default=False)
     order = models.PositiveSmallIntegerField(default=0)
+
+    # Structured wire/IPTC-style metadata -- the industry-standard fields
+    # a real photo/video wire buyer expects to filter and verify by
+    # (Getty/AP Images/Storyful all capture these). All optional since a
+    # seller's device/upload may not provide them.
+    capture_date = models.DateTimeField(
+        null=True, blank=True, help_text="When the photo/video was actually captured, distinct from when it was uploaded/published."
+    )
+    gps_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    credit_line = models.CharField(
+        max_length=255, blank=True, help_text="Attribution text required when this media is republished, e.g. 'Photo: Jane Reporter / WEMIX'."
+    )
+    keywords = models.CharField(max_length=500, blank=True, help_text="Comma-separated search keywords, wire-service style.")
 
     class Meta:
         ordering = ["order", "created_at"]
@@ -335,6 +359,84 @@ class Follow(BaseModel):
 
     def __str__(self):
         return f"{self.follower_id} follows {self.followed_id}"
+
+
+class FreePreviewGrant(BaseModel):
+    """Records that a buyer used one of their metered free-preview slots
+    on a specific listing in a specific month -- both so re-visiting the
+    same listing later that month doesn't cost another slot, and so the
+    monthly count is a simple row count rather than needing a separate
+    counter to keep in sync."""
+
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="free_preview_grants")
+    listing = models.ForeignKey(NewsListing, on_delete=models.CASCADE, related_name="free_preview_grants")
+    month_key = models.CharField(max_length=7, db_index=True, help_text="'YYYY-MM' of when this preview was granted.")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["buyer", "listing", "month_key"], name="unique_free_preview_per_buyer_listing_month")
+        ]
+
+
+class SavedSearch(BaseModel):
+    """A buyer's standing filter -- 'notify me when a new verified story
+    matching this publishes' -- instead of only ever finding new content
+    by passively browsing. Matching runs once, at publish time (see
+    news/services_alerts.py), not as a live query buyers re-run."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_searches")
+    name = models.CharField(max_length=100, blank=True, help_text="A label for the buyer's own reference, e.g. 'Dar es Salaam politics'.")
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, null=True, blank=True, related_name="saved_searches")
+    news_type = models.CharField(max_length=20, choices=NewsListing.NewsType.choices, blank=True)
+    location_contains = models.CharField(max_length=255, blank=True)
+    min_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    max_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["is_active"])]
+
+    def __str__(self):
+        return self.name or f"Saved search {self.id}"
+
+    def matches(self, listing: "NewsListing") -> bool:
+        if self.category_id and listing.category_id != self.category_id:
+            return False
+        if self.news_type and listing.news_type != self.news_type:
+            return False
+        if self.location_contains and self.location_contains.lower() not in (listing.location or "").lower():
+            return False
+        if self.min_price is not None and listing.price < self.min_price:
+            return False
+        if self.max_price is not None and listing.price > self.max_price:
+            return False
+        return True
+
+
+class Correction(BaseModel):
+    """A public correction or retraction note attached to a listing --
+    the credibility mechanism 'verified news' needs: if a published,
+    possibly-already-purchased story turns out to be wrong, this is how
+    that gets acknowledged visibly instead of the story just silently
+    disappearing (which the existing moderator suspend/reject path
+    already handles, but tells buyers nothing)."""
+
+    listing = models.ForeignKey(NewsListing, on_delete=models.CASCADE, related_name="corrections")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
+    is_retraction = models.BooleanField(
+        default=False,
+        help_text="A retraction is a stronger signal than a correction -- the story is being flagged as "
+                   "materially wrong, not just amended.",
+    )
+    text = models.TextField()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{'Retraction' if self.is_retraction else 'Correction'} on '{self.listing.title}'"
 
 
 class SocialShareRecord(BaseModel):

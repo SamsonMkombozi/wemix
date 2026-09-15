@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from news.models import NewsListing
-from wallet.models import Wallet, WalletTransaction
+from wallet.models import Wallet, WalletHold, WalletTransaction
 from wallet.services import credit_wallet_on_sale
 
 from .models import NalaTransaction, Order, PaymentWebhookLog, SelcomTransaction
@@ -374,6 +374,21 @@ def process_refund(refund_request) -> None:
             reference=str(refund_request.id),
             description=f"Refund reversal for '{listing.title}'",
         )
+
+        # If the original sale's payout hold hasn't matured yet, release it
+        # now rather than letting it mature later -- the money it was
+        # holding just left `balance` above, so leaving pending_balance
+        # reserved against it would make available-for-withdrawal
+        # (balance - pending_balance) undercount, potentially negative.
+        original_hold = WalletHold.objects.filter(
+            transaction__order=order, transaction__entry_type=WalletTransaction.EntryType.SALE_CREDIT, released=False,
+        ).first()
+        if original_hold:
+            seller_wallet.pending_balance = seller_wallet.pending_balance - original_hold.amount
+            seller_wallet.save(update_fields=["pending_balance", "updated_at"])
+            original_hold.released = True
+            original_hold.released_at = timezone.now()
+            original_hold.save(update_fields=["released", "released_at", "updated_at"])
 
         platform_wallet.balance = platform_wallet.balance - commission
         platform_wallet.save(update_fields=["balance", "updated_at"])

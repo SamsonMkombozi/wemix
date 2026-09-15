@@ -137,6 +137,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
+        "core.authentication.APIKeyAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_THROTTLE_CLASSES": (
@@ -200,6 +201,13 @@ ALLOWED_UPLOAD_VIDEO_TYPES = ["video/mp4", "video/quicktime"]
 # ------------------------------------------------------------------
 PLATFORM_COMMISSION_RATE = env.float("PLATFORM_COMMISSION_RATE", default=0.10)  # 10%
 
+# How long a seller's earning is held before it counts toward their
+# withdrawable balance -- covers the window a buyer has to file a refund
+# request, the same pattern Airbnb/Upwork/Etsy use to guard against
+# pay-then-refund fraud. Not a confirmed business policy figure; tune via
+# env once finance signs off on a real number.
+WALLET_HOLD_PERIOD_HOURS = env.int("WALLET_HOLD_PERIOD_HOURS", default=72)
+
 # Terms & Conditions: bump this whenever the terms text materially
 # changes -- accounts/views.py re-prompts a user to re-accept whenever
 # their latest TermsAcceptance.version doesn't match this.
@@ -217,6 +225,13 @@ WITHDRAWAL_MONTHLY_LIMIT = env.float("WITHDRAWAL_MONTHLY_LIMIT", default=20_000_
 # (not blocked) -- surfaced as a warning pill in the withdrawal queue.
 WITHDRAWAL_RISK_FLAG_THRESHOLD = env.float("WITHDRAWAL_RISK_FLAG_THRESHOLD", default=1_500_000)
 
+# Metered paywall: free full-story unlocks a buyer gets per calendar
+# month, across any listings, before every story requires payment (or an
+# active subscription) -- the standard "read 3 free articles" conversion
+# pattern. Not a confirmed business figure; tune once there's real
+# traffic to A/B against.
+FREE_PREVIEW_QUOTA_PER_MONTH = env.int("FREE_PREVIEW_QUOTA_PER_MONTH", default=3)
+
 # ------------------------------------------------------------------
 # Selcom payment gateway
 # ------------------------------------------------------------------
@@ -228,6 +243,10 @@ SELCOM_WEBHOOK_IP_ALLOWLIST = env.list("SELCOM_WEBHOOK_IP_ALLOWLIST", default=[]
 SELCOM_WEBHOOK_URL = env(
     "SELCOM_WEBHOOK_URL",
     default="http://localhost:8000/api/payments/webhooks/selcom/",
+)
+SELCOM_SUBSCRIPTION_WEBHOOK_URL = env(
+    "SELCOM_SUBSCRIPTION_WEBHOOK_URL",
+    default="http://localhost:8000/api/payments/webhooks/selcom-subscription/",
 )
 
 # Nala/Rafiki -- international payment collections. See
@@ -264,6 +283,51 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Habari Platform <no-reply@habariplatform.co.tz>")
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+
+# ------------------------------------------------------------------
+# Celery (async task queue) -- AI verification, OCR, and image analysis
+# run as Celery tasks (see news/tasks.py, accounts/tasks.py) instead of
+# inline inside the request that triggers them. CELERY_TASK_ALWAYS_EAGER
+# defaults to True whenever CELERY_BROKER_URL is unset, which runs every
+# task synchronously in-process -- identical to the old inline-call
+# behavior, so nothing changes here until a real Redis broker is
+# configured AND a worker process is started. Turning genuinely async:
+# set CELERY_BROKER_URL, run `celery -A habari_platform worker`, and note
+# that submit()/media() responses will then reflect "queued", not the
+# final AI result -- a caller that wants the outcome needs to poll
+# GET .../ai-results/ or listen for the existing Notification instead of
+# reading it straight off the POST response.
+# ------------------------------------------------------------------
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL or None
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=not bool(CELERY_BROKER_URL))
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# ------------------------------------------------------------------
+# Error tracking (Sentry) -- same honest-placeholder pattern as the
+# Selcom/Nala credentials: reads from env, and is a genuine no-op with
+# zero behavior change if SENTRY_DSN is unset (which it is by default in
+# every environment until someone creates a real Sentry project and sets
+# it -- that account creation is the user's to do, not something this
+# codebase can provision on its own). Doesn't touch performance-tracing
+# sample rates beyond a conservative default so it's cheap to turn on.
+# ------------------------------------------------------------------
+SENTRY_DSN = env("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.1),
+        environment=env("SENTRY_ENVIRONMENT", default="development" if DEBUG else "production"),
+        send_default_pii=False,
+    )
 
 # ------------------------------------------------------------------
 # Logging — everything to stdout/stderr in production (captured by

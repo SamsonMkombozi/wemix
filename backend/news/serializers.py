@@ -6,14 +6,49 @@ from .models import (
     AIVerificationResult,
     Bookmark,
     Category,
+    Correction,
     Follow,
     ImageAnalysisResult,
     ListingView,
     NewsListing,
     NewsMedia,
     Review,
+    SavedSearch,
     Tag,
 )
+
+
+class SavedSearchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedSearch
+        fields = [
+            "id", "name", "category", "news_type", "location_contains",
+            "min_price", "max_price", "is_active", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def create(self, validated_data):
+        return SavedSearch.objects.create(user=self.context["request"].user, **validated_data)
+
+
+class CorrectionSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.CharField(source="created_by.username", read_only=True, default="")
+
+    class Meta:
+        model = Correction
+        fields = ["id", "is_retraction", "text", "created_by_username", "created_at"]
+        read_only_fields = fields
+
+
+class CorrectionCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Correction
+        fields = ["is_retraction", "text"]
+
+    def create(self, validated_data):
+        return Correction.objects.create(
+            listing=self.context["listing"], created_by=self.context["request"].user, **validated_data
+        )
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -48,8 +83,29 @@ class NewsMediaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = NewsMedia
-        fields = ["id", "media_type", "file", "preview_file", "is_cover", "order", "analysis_results"]
+        fields = [
+            "id", "media_type", "file", "preview_file", "is_cover", "order", "analysis_results",
+            "capture_date", "gps_latitude", "gps_longitude", "credit_line", "keywords",
+        ]
         read_only_fields = ["id", "analysis_results"]
+
+    def validate(self, attrs):
+        # Dispatches on the declared media_type rather than trusting the
+        # upload's filename/Content-Type -- those are exactly what a
+        # malicious upload would fake.
+        from core.validators import validate_document_upload, validate_image_upload, validate_video_upload
+
+        file_obj = attrs.get("file")
+        media_type = attrs.get("media_type")
+        if file_obj and media_type:
+            validator = {
+                NewsMedia.MediaType.IMAGE: validate_image_upload,
+                NewsMedia.MediaType.VIDEO: validate_video_upload,
+                NewsMedia.MediaType.DOCUMENT: validate_document_upload,
+            }.get(media_type)
+            if validator:
+                validator(file_obj)
+        return attrs
 
     def create(self, validated_data):
         listing = self.context["listing"]
@@ -83,9 +139,17 @@ class NewsListingListSerializer(serializers.ModelSerializer):
     the paywalled `body` field."""
 
     seller_username = serializers.CharField(source="seller.username", read_only=True)
+    seller_trust_score = serializers.IntegerField(source="seller.trust_score", read_only=True)
     cover_image = serializers.SerializerMethodField()
     is_bookmarked = serializers.SerializerMethodField()
     is_following_seller = serializers.SerializerMethodField()
+    has_correction = serializers.SerializerMethodField()
+
+    def get_has_correction(self, obj):
+        prefetched = self.context.get("corrected_listing_ids")
+        if prefetched is not None:
+            return obj.id in prefetched
+        return obj.corrections.exists()
 
     def get_is_following_seller(self, obj):
         request = self.context.get("request")
@@ -120,10 +184,13 @@ class NewsListingListSerializer(serializers.ModelSerializer):
             "location",
             "price",
             "currency",
+            "license_type",
+            "license_territory",
             "verification_status",
             "ai_score",
             "status",
             "seller_username",
+            "seller_trust_score",
             "cover_image",
             "byline",
             "dateline",
@@ -131,6 +198,7 @@ class NewsListingListSerializer(serializers.ModelSerializer):
             "featured",
             "is_bookmarked",
             "is_following_seller",
+            "has_correction",
             "view_count",
             "purchase_count",
             "average_rating",
@@ -158,6 +226,9 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
     seller_avatar = serializers.ImageField(source="seller.avatar", read_only=True, use_url=True)
     seller_bio = serializers.CharField(source="seller.bio", read_only=True)
     seller_verified_badge = serializers.BooleanField(source="seller.is_verified_badge", read_only=True)
+    seller_trust_score = serializers.IntegerField(source="seller.trust_score", read_only=True)
+    seller_subscription_price = serializers.DecimalField(source="seller.subscription_price", max_digits=12, decimal_places=2, read_only=True, allow_null=True)
+    corrections = serializers.SerializerMethodField()
     seller_website_url = serializers.CharField(source="seller.website_url", read_only=True)
     seller_twitter_url = serializers.CharField(source="seller.twitter_url", read_only=True)
     seller_facebook_url = serializers.CharField(source="seller.facebook_url", read_only=True)
@@ -165,6 +236,7 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
     media = NewsMediaSerializer(many=True, read_only=True)
     body = serializers.SerializerMethodField()
     body_locked = serializers.SerializerMethodField()
+    is_free_preview = serializers.SerializerMethodField()
     seller_earning = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     platform_commission = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     latest_ai_verification = serializers.SerializerMethodField()
@@ -187,6 +259,9 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
             return False
         return Bookmark.objects.filter(user=request.user, listing=obj).exists()
 
+    def get_corrections(self, obj):
+        return CorrectionSerializer(obj.corrections.select_related("created_by").order_by("-created_at"), many=True).data
+
     class Meta:
         model = NewsListing
         fields = [
@@ -197,12 +272,15 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
             "meta_description",
             "body",
             "body_locked",
+            "is_free_preview",
             "news_type",
             "category",
             "tags",
             "location",
             "price",
             "currency",
+            "license_type",
+            "license_territory",
             "verification_status",
             "ai_score",
             "status",
@@ -211,6 +289,9 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
             "seller_avatar",
             "seller_bio",
             "seller_verified_badge",
+            "seller_trust_score",
+            "seller_subscription_price",
+            "corrections",
             "seller_website_url",
             "seller_twitter_url",
             "seller_facebook_url",
@@ -246,13 +327,40 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
             return True
         if user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff:
             return True
-        return Order.objects.filter(buyer=user, listing=obj, status=Order.Status.PAID).exists()
+        if Order.objects.filter(buyer=user, listing=obj, status=Order.Status.PAID).exists():
+            return True
+
+        from payments.models import Subscription
+
+        active_subscription = Subscription.objects.filter(
+            subscriber=user, seller_id=obj.seller_id, status=Subscription.Status.ACTIVE,
+        ).first()
+        if active_subscription and active_subscription.is_currently_active():
+            return True
+
+        from .services_preview import consume_free_preview_if_eligible
+
+        return consume_free_preview_if_eligible(user, obj)
 
     def get_body(self, obj):
         return obj.body if self._has_access(obj) else None
 
     def get_body_locked(self, obj):
         return not self._has_access(obj)
+
+    def get_is_free_preview(self, obj):
+        # Read-only check (no side effect) -- by the time this runs,
+        # get_body_locked above has already consumed the grant if this
+        # view qualified for one, per the Meta.fields ordering.
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        from django.utils import timezone
+
+        from .models import FreePreviewGrant
+
+        month_key = timezone.now().strftime("%Y-%m")
+        return FreePreviewGrant.objects.filter(buyer=request.user, listing=obj, month_key=month_key).exists()
 
     def get_latest_ai_verification(self, obj):
         latest = obj.ai_verifications.order_by("-created_at").first()
@@ -285,6 +393,8 @@ class NewsListingWriteSerializer(serializers.ModelSerializer):
             "dateline",
             "price",
             "currency",
+            "license_type",
+            "license_territory",
             "status",
             "verification_status",
             "reading_time_minutes",
@@ -388,6 +498,11 @@ class ModerateListingSerializer(serializers.Serializer):
 
         listing.save(update_fields=["verification_status", "status", "published_at", "updated_at"])
         notify_verification_outcome(listing, outcome)
+
+        if decision == "approve":
+            from .services_alerts import notify_saved_search_matches
+            notify_saved_search_matches(listing)
+
         return listing
 
 

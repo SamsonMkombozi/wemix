@@ -106,6 +106,7 @@ class UserSerializer(serializers.ModelSerializer):
             "journalist_tier",
             "is_press_credentialed",
             "is_corporate",
+            "subscription_price",
             "date_joined",
         ]
         read_only_fields = [
@@ -229,6 +230,26 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class IdentityVerificationSerializer(serializers.ModelSerializer):
+    def validate_front_image(self, value):
+        from core.validators import validate_image_upload
+        validate_image_upload(value)
+        return value
+
+    def validate_back_image(self, value):
+        from core.validators import validate_image_upload
+        validate_image_upload(value)
+        return value
+
+    def validate_selfie_image(self, value):
+        from core.validators import validate_image_upload
+        validate_image_upload(value)
+        return value
+
+    def validate_press_credential_image(self, value):
+        from core.validators import validate_image_upload
+        validate_image_upload(value)
+        return value
+
     class Meta:
         model = IdentityVerification
         fields = [
@@ -381,6 +402,21 @@ class Disable2FASerializer(serializers.Serializer):
 
 
 class CorporateVerificationSerializer(serializers.ModelSerializer):
+    def validate_business_license(self, value):
+        from core.validators import validate_document_or_image_upload
+        validate_document_or_image_upload(value)
+        return value
+
+    def validate_company_registration(self, value):
+        from core.validators import validate_document_or_image_upload
+        validate_document_or_image_upload(value)
+        return value
+
+    def validate_tax_document(self, value):
+        from core.validators import validate_document_or_image_upload
+        validate_document_or_image_upload(value)
+        return value
+
     class Meta:
         model = CorporateVerification
         fields = [

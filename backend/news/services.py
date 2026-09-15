@@ -27,9 +27,13 @@ def read_media_download_token(token: str) -> str:
     return payload["media_id"]
 
 
-def log_news_action(*, actor, action, listing, description="", request=None, metadata=None):
-    ip = None
-    ua = ""
+def log_news_action(*, actor, action, listing, description="", request=None, ip_address=None, user_agent="", metadata=None):
+    """`request` is the normal path for a view calling this synchronously.
+    A Celery task has no request object to hand it (it isn't
+    serializable across a real broker) -- pass ip_address/user_agent
+    directly instead in that case."""
+    ip = ip_address
+    ua = user_agent
     if request is not None:
         ip = request.META.get("REMOTE_ADDR")
         ua = request.META.get("HTTP_USER_AGENT", "")[:512]

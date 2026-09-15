@@ -105,20 +105,49 @@ async function loadListing() {
   }
 }
 
-function renderListing(listing) {
-  document.title = `${listing.title} — Habari Platform`;
-  let metaTag = document.querySelector('meta[name="description"]');
-  if (!metaTag) {
-    metaTag = document.createElement('meta');
-    metaTag.name = 'description';
-    document.head.appendChild(metaTag);
+function setMeta(attr, key, content) {
+  let tag = document.querySelector(`meta[${attr}="${key}"]`);
+  if (!tag) {
+    tag = document.createElement('meta');
+    tag.setAttribute(attr, key);
+    document.head.appendChild(tag);
   }
-  metaTag.content = listing.meta_description || listing.description || '';
+  tag.setAttribute('content', content);
+}
 
+function renderListing(listing) {
+  const description = listing.meta_description || listing.description || '';
   const cover = (listing.media || []).find((m) => m.is_cover) || (listing.media || [])[0];
+  const coverUrl = cover ? (cover.preview_file || cover.file) : '';
+
+  document.title = `${listing.title} — WEMIX`;
+  setMeta('name', 'description', description);
+
+  // Open Graph + Twitter Card: without these, a link to this listing
+  // shared on WhatsApp/X/Facebook renders with no title, image, or
+  // description -- a plain gray box, which kills organic sharing for
+  // exactly the kind of content this platform depends on spreading.
+  setMeta('property', 'og:type', 'article');
+  setMeta('property', 'og:title', listing.title);
+  setMeta('property', 'og:description', description);
+  setMeta('property', 'og:url', window.location.href);
+  setMeta('property', 'og:site_name', 'WEMIX');
+  if (coverUrl) setMeta('property', 'og:image', coverUrl);
+  setMeta('name', 'twitter:card', coverUrl ? 'summary_large_image' : 'summary');
+  setMeta('name', 'twitter:title', listing.title);
+  setMeta('name', 'twitter:description', description);
+  if (coverUrl) setMeta('name', 'twitter:image', coverUrl);
+
   const mediaHtml = cover
     ? `<div class="detail-media"><img src="${cover.preview_file || cover.file}" alt=""></div>`
     : '';
+
+  const correctionsHtml = (listing.corrections || []).length ? listing.corrections.map((c) => `
+    <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:10px;">
+      <strong>${c.is_retraction ? '&#9888; Retraction' : 'Correction'}${c.created_by_username ? ' by ' + escapeHtml(c.created_by_username) : ''} &middot; ${timeAgo(c.created_at)}</strong>
+      <p style="margin:6px 0 0 0;">${escapeHtml(c.text)}</p>
+    </div>
+  `).join('') : '';
 
   const bodyHtml = listing.body_locked
     ? `<div class="paywall">
@@ -141,6 +170,7 @@ function renderListing(listing) {
   content.innerHTML = `
     <div class="detail-grid">
       <div>
+        ${correctionsHtml}
         ${mediaHtml}
         <div class="listing-eyebrow">${escapeHtml((listing.news_type || '').replace('_', ' '))} &middot; ${pillForVerification(listing.verification_status)}${listing.featured ? ' &middot; <span class="pill pill-verified">Featured</span>' : ''}</div>
         <h1>${escapeHtml(listing.title)}</h1>
@@ -148,6 +178,7 @@ function renderListing(listing) {
           ${listing.seller_avatar ? `<img src="${listing.seller_avatar}" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : ''}
           <span>${bylineLine}${readingTimeLine} &middot; ${escapeHtml(listing.location || '')}</span>
           ${listing.seller_verified_badge ? `<span title="Verified publisher" style="color:var(--color-gold-dark); font-weight:700;">&#10003;</span>` : ''}
+          ${listing.seller_trust_score != null ? `<span class="pill ${listing.seller_trust_score >= 70 ? 'pill-verified' : (listing.seller_trust_score >= 40 ? 'pill-pending' : 'pill-rejected')}" title="Platform trust score, adjusted by moderation history">Trust ${listing.seller_trust_score}</span>` : ''}
         </p>
         ${listing.seller_bio ? `<p class="text-muted" style="font-size:0.85rem; margin:2px 0 6px 0;">${escapeHtml(listing.seller_bio)}</p>` : ''}
         ${(listing.seller_website_url || listing.seller_twitter_url || listing.seller_facebook_url) ? `
@@ -160,9 +191,12 @@ function renderListing(listing) {
         <p style="margin:2px 0 10px 0;">
           <span class="text-muted" style="font-size:0.85rem;">${listing.seller_follower_count != null ? listing.seller_follower_count : 0} follower${listing.seller_follower_count === 1 ? '' : 's'}</span>
           ${(user && !isOwner) ? `<button class="btn btn-outline btn-sm" id="follow-seller-btn" data-slug="${listing.slug}" style="margin-left:10px; padding:3px 12px; font-size:0.8rem;">${listing.is_following_seller ? 'Following' : 'Follow'}</button>` : ''}
+          ${(user && !isOwner && listing.seller_subscription_price != null) ? `<button class="btn btn-sm" id="subscribe-seller-btn" data-seller="${listing.seller}" style="margin-left:6px; padding:3px 12px; font-size:0.8rem;">Subscribe &middot; ${money(listing.seller_subscription_price)}/mo</button>` : ''}
         </p>
         <p style="margin:6px 0 14px 0;">${ratingHtml}</p>
+        <p style="font-size:0.8rem;"><span class="pill pill-draft">${escapeHtml((listing.license_type || 'standard').replace('_', ' '))} license</span> <span class="text-muted">&middot; ${escapeHtml(listing.license_territory || 'Worldwide')}</span></p>
         <p>${escapeHtml(listing.description)}</p>
+        ${listing.is_free_preview ? `<div class="alert alert-info">You're reading this as a free preview (part of your monthly free-story allowance) -- not purchased.</div>` : ''}
         ${bodyHtml}
         ${!listing.body_locked && (listing.media || []).length ? `
           <div class="card" style="padding:16px 20px; margin-top:14px;">
@@ -250,6 +284,29 @@ function renderListing(listing) {
         alert(formatApiError(err));
       } finally {
         followBtn.disabled = false;
+      }
+    });
+  }
+
+  const subscribeBtn = document.getElementById('subscribe-seller-btn');
+  if (subscribeBtn) {
+    subscribeBtn.addEventListener('click', async () => {
+      subscribeBtn.disabled = true;
+      subscribeBtn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const result = await apiFetch('/api/payments/subscriptions/', {
+          method: 'POST',
+          body: { seller: subscribeBtn.dataset.seller, channel: 'mobile_money', msisdn: user?.phone_number || '' },
+        });
+        if (result.payment_gateway_url) {
+          window.location.href = result.payment_gateway_url;
+        } else {
+          alert('Subscription started -- check your phone to approve the payment.');
+        }
+      } catch (err) {
+        alert(formatApiError(err));
+        subscribeBtn.disabled = false;
+        subscribeBtn.textContent = 'Subscribe';
       }
     });
   }

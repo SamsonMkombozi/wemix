@@ -135,6 +135,51 @@ class IntegrationCredential(BaseModel):
         return f"{self.provider}.{self.field_name}"
 
 
+def _generate_api_key_raw() -> str:
+    import secrets
+
+    return f"wmx_{secrets.token_urlsafe(32)}"
+
+
+def _hash_api_key(raw_key: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+class APIKey(BaseModel):
+    """
+    Programmatic access for enterprise/B2B buyers (media houses, verified
+    corporate accounts) -- the same access a browser session gets via
+    JWT, but usable from a script/newsroom system instead of a browser.
+    The raw key is shown to the user exactly once, at creation; only its
+    SHA-256 hash is ever stored, the same principle as password storage.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_keys")
+    name = models.CharField(max_length=100, help_text="A label the user picks, e.g. 'Newsroom ingest script'.")
+    key_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    prefix = models.CharField(max_length=12, help_text="First few characters of the raw key, shown in lists so a user can tell keys apart without re-seeing the full value.")
+    is_active = models.BooleanField(default=True, db_index=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.prefix}...) for {self.user_id}"
+
+    @classmethod
+    def create_for_user(cls, user, name: str):
+        """Returns (instance, raw_key) -- raw_key is never recoverable
+        after this call returns."""
+        raw_key = _generate_api_key_raw()
+        instance = cls.objects.create(
+            user=user, name=name, key_hash=_hash_api_key(raw_key), prefix=raw_key[:12],
+        )
+        return instance, raw_key
+
+
 class TermsAcceptance(BaseModel):
     """Records that a user explicitly accepted a specific version of the
     Terms & Conditions -- one row per acceptance event, so re-accepting a
@@ -240,6 +285,9 @@ class Notification(BaseModel):
         MODERATION_ACTION = "moderation_action", "Moderation action taken"
         NEW_REVIEW = "new_review", "New review received"
         SUPPORT_TICKET_REPLY = "support_ticket_reply", "Support ticket reply"
+        SAVED_SEARCH_MATCH = "saved_search_match", "New listing matches a saved search"
+        SUBSCRIPTION_RENEWAL_DUE = "subscription_renewal_due", "Subscription renewal due"
+        SUBSCRIPTION_ACTIVATED = "subscription_activated", "Subscription activated"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"

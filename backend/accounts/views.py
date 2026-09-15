@@ -1,5 +1,6 @@
 from django.core import signing
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -125,6 +126,70 @@ class MeView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class ExportMyDataView(APIView):
+    """GET /api/accounts/me/export/ -- a JSON download of everything this
+    account owns, across every app: profile, KYC/corporate verification
+    submissions, listings, orders, wallet transactions, subscriptions,
+    reviews, bookmarks, saved searches, support tickets. Self-service
+    data portability -- previously the only way to get this out was a
+    direct database query on someone's behalf."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.http import HttpResponse
+
+        user = request.user
+
+        def as_list(qs, fields):
+            return [{f: str(getattr(obj, f)) for f in fields} for obj in qs]
+
+        data = {
+            "exported_at": timezone.now().isoformat(),
+            "profile": UserSerializer(user).data,
+            "identity_verifications": as_list(
+                user.identity_verifications.all(), ["id", "id_type", "status", "created_at"]
+            ),
+            "corporate_verifications": as_list(
+                user.corporate_verifications.all(), ["id", "company_name", "status", "created_at"]
+            ),
+            "listings": as_list(
+                user.news_listings.all(), ["id", "title", "slug", "status", "price", "created_at"]
+            ),
+            "orders": as_list(
+                user.orders.all(), ["id", "listing_id", "amount", "status", "created_at"]
+            ),
+            "reviews_written": as_list(
+                user.reviews_written.all(), ["id", "listing_id", "rating", "comment", "created_at"]
+            ),
+            "bookmarks": as_list(user.bookmarks.all(), ["id", "listing_id", "created_at"]),
+            "support_tickets": as_list(
+                user.support_tickets.all(), ["id", "category", "subject", "status", "created_at"]
+            ),
+            "saved_searches": as_list(
+                user.saved_searches.all(), ["id", "name", "category_id", "created_at"]
+            ),
+            "subscriptions": as_list(
+                user.subscriptions.all(), ["id", "seller_id", "price", "status", "current_period_end"]
+            ),
+            "wallet": None,
+        }
+        if hasattr(user, "wallet"):
+            data["wallet"] = {
+                "balance": str(user.wallet.balance),
+                "currency": user.wallet.currency,
+                "transactions": as_list(
+                    user.wallet.transactions.all(), ["id", "entry_type", "amount", "description", "created_at"]
+                ),
+            }
+
+        import json
+
+        response = HttpResponse(json.dumps(data, indent=2, default=str), content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="wemix-data-export-{user.username}.json"'
+        return response
 
 
 class DeactivateAccountView(APIView):
