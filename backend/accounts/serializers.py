@@ -273,6 +273,7 @@ class IdentityVerificationSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        from .face_match import run_face_match
         from .ocr import run_ocr_on_verification
 
         user = self.context["request"].user
@@ -284,12 +285,14 @@ class IdentityVerificationSerializer(serializers.ModelSerializer):
                 id_verification_status=User.VerificationStatus.PENDING
             )
 
-        # Runs after the transaction commits successfully -- OCR reads
-        # the just-saved file from storage, and there's no reason a slow
-        # OCR call should hold the DB transaction open. Never blocks
-        # submission: run_ocr_on_verification degrades gracefully if
-        # tesseract isn't installed.
+        # Runs after the transaction commits successfully -- both read
+        # the just-saved files from storage, and there's no reason a
+        # slow OCR/face-match call should hold the DB transaction open.
+        # Neither blocks submission: both degrade gracefully (OCR if
+        # tesseract isn't installed, face match if no vendor is
+        # configured -- see accounts/face_match.py).
         run_ocr_on_verification(verification)
+        run_face_match(verification)
         verification.refresh_from_db()
         return verification
 

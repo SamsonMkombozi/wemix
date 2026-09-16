@@ -62,6 +62,7 @@ def process_media_upload_task(media_id: str, actor_id: str, ip_address, user_age
     from core.models import AuditLog
 
     from .image_analysis import run_image_analysis
+    from .media_preview import generate_preview
     from .models import NewsListing, NewsMedia
     from .services import log_news_action
 
@@ -69,6 +70,7 @@ def process_media_upload_task(media_id: str, actor_id: str, ip_address, user_age
     listing = media_obj.listing
     actor = User.objects.filter(pk=actor_id).first()
 
+    generate_preview(media_obj)
     analysis = run_image_analysis(media_obj)
     if analysis.flagged and listing.status == NewsListing.ListingStatus.PUBLISHED:
         listing.status = NewsListing.ListingStatus.SUBMITTED

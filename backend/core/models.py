@@ -302,6 +302,7 @@ class Notification(BaseModel):
     is_read = models.BooleanField(default=False, db_index=True)
     read_at = models.DateTimeField(null=True, blank=True)
     email_sent = models.BooleanField(default=False)
+    sms_sent = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-created_at"]

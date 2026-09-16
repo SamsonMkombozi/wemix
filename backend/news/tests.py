@@ -53,6 +53,69 @@ class ListingLifecycleAPITests(APITestCase):
         self.assertEqual(resp.data["status"], "draft")
 
 
+class ListingSearchTests(APITestCase):
+    """The `q` browse filter used to be exact-substring matching
+    (icontains) with no relevance ordering at all -- results always came
+    back newest-first regardless of match quality. This exercises the
+    Postgres full-text search replacement: real ranking, English
+    stemming, and tag matching kept separate from the ranked vector."""
+
+    def setUp(self):
+        self.seller = make_seller()
+        self.category = make_category()
+
+    def _make_listing(self, title, description="d", body="b", price=Decimal("1000"), **extra):
+        return NewsListing.objects.create(
+            seller=self.seller, title=title, description=description, body=body,
+            news_type=NewsListing.NewsType.TEXT, category=self.category, price=price,
+            status=NewsListing.ListingStatus.PUBLISHED, verification_status=NewsListing.VerificationStatus.VERIFIED,
+            **extra,
+        )
+
+    def test_matches_title(self):
+        match = self._make_listing("Severe flooding hits coastal villages")
+        self._make_listing("Parliament debates new budget")
+        resp = self.client.get("/api/news/listings/?q=flooding")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [match.slug])
+
+    def test_stemming_matches_a_different_word_form(self):
+        match = self._make_listing("Severe flooding hits coastal villages")
+        resp = self.client.get("/api/news/listings/?q=floods")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [match.slug])
+
+    def test_unrelated_listing_is_excluded(self):
+        self._make_listing("Parliament debates new budget")
+        resp = self.client.get("/api/news/listings/?q=flooding")
+        self.assertEqual(resp.data["results"], [])
+
+    def test_title_match_ranks_above_body_only_match(self):
+        body_only = self._make_listing("Local elections wrap up", body="Turnout was affected by flooding in three regions.")
+        title_match = self._make_listing("Flooding disrupts local elections")
+        resp = self.client.get("/api/news/listings/?q=flooding")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [title_match.slug, body_only.slug])
+
+    def test_matches_by_tag(self):
+        from .models import Tag
+
+        tag = Tag.objects.create(name="drought")
+        match = self._make_listing("Regional harvest report")
+        match.tags.set([tag])
+        self._make_listing("Unrelated sports recap")
+        resp = self.client.get("/api/news/listings/?q=drought")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [match.slug])
+
+    def test_explicit_ordering_overrides_relevance(self):
+        cheap_body_match = self._make_listing("Local elections wrap up", body="flooding mentioned once", price=Decimal("500"))
+        expensive_title_match = self._make_listing("Flooding disrupts elections", price=Decimal("5000"))
+        resp = self.client.get("/api/news/listings/?q=flooding&ordering=price")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [cheap_body_match.slug, expensive_title_match.slug])
+
+
 class SubmitForReviewTests(APITestCase):
     """Exercises the submit() action end-to-end through its Celery task
     (news/tasks.py::process_listing_submission_task) in the default
@@ -182,6 +245,17 @@ class MediaUploadTaskTests(APITestCase):
         # The task runs synchronously in eager mode -- by the time the
         # response returned, ImageAnalysisResult should already exist.
         self.assertTrue(NewsMedia.objects.get(pk=media_id).analysis_results.exists())
+
+    def test_upload_generates_a_watermarked_preview_synchronously(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(self.seller)
+        resp = self.client.post(
+            f"/api/news/listings/{self.listing.slug}/media/",
+            {"media_type": "image", "file": SimpleUploadedFile("cover.jpg", make_real_jpeg_bytes(), content_type="image/jpeg"), "is_cover": True},
+            format="multipart",
+        )
+        self.assertIsNotNone(resp.data["preview_file"])
 
 
 def make_real_jpeg_bytes():
@@ -452,6 +526,98 @@ class ExclusiveLicenseTests(APITestCase):
             create_order_and_initiate_payment(buyer=other_buyer, listing=self.listing, channel="mobile_money", msisdn="0712345678")
 
 
+class LicenseEditingTests(APITestCase):
+    def setUp(self):
+        self.seller = make_seller()
+        self.buyer = make_buyer()
+        self.listing = NewsListing.objects.create(
+            seller=self.seller, title="t", description="d", body="b", news_type=NewsListing.NewsType.TEXT,
+            category=make_category(), price=Decimal("1000"), status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status=NewsListing.VerificationStatus.VERIFIED,
+            license_type=NewsListing.LicenseType.STANDARD,
+        )
+        self.client.force_authenticate(self.seller)
+
+    def test_can_change_license_terms_before_any_sale(self):
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/",
+            {"license_type": "exclusive", "license_territory": "Tanzania only"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.license_type, "exclusive")
+        self.assertEqual(self.listing.license_territory, "Tanzania only")
+
+    def test_license_only_change_does_not_pull_listing_back_for_review(self):
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/", {"license_type": "broadcast"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.status, NewsListing.ListingStatus.PUBLISHED)
+        self.assertEqual(self.listing.verification_status, NewsListing.VerificationStatus.VERIFIED)
+
+    def test_cannot_change_license_type_after_a_sale(self):
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/", {"license_type": "exclusive"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.license_type, "standard")
+
+    def test_cannot_change_license_territory_after_a_sale(self):
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/", {"license_territory": "Kenya only"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_editing_other_fields_still_allowed_after_a_sale(self):
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/", {"byline": "By a corrected name"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_setting_same_license_value_after_sale_is_not_blocked(self):
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        resp = self.client.patch(
+            f"/api/news/listings/{self.listing.slug}/", {"license_type": "standard"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+
+class SubmittedListingEditTests(APITestCase):
+    """Covers the fix where editing a listing still sitting in the
+    moderation queue (SUBMITTED, not yet PUBLISHED) now correctly
+    invalidates its stale verification_status -- it previously either
+    always reset it unconditionally (even for a no-op edit) or, after an
+    earlier refactor, never reset it for this specific status."""
+
+    def setUp(self):
+        self.seller = make_seller()
+        self.listing = NewsListing.objects.create(
+            seller=self.seller, title="Original", description="d", body="b", news_type=NewsListing.NewsType.TEXT,
+            category=make_category(), price=Decimal("1000"), status=NewsListing.ListingStatus.SUBMITTED,
+            verification_status=NewsListing.VerificationStatus.NEEDS_HUMAN_REVIEW,
+        )
+        self.client.force_authenticate(self.seller)
+
+    def test_content_edit_on_submitted_listing_invalidates_verification(self):
+        resp = self.client.patch(f"/api/news/listings/{self.listing.slug}/", {"body": "a materially different story"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.status, NewsListing.ListingStatus.SUBMITTED)
+        self.assertEqual(self.listing.verification_status, NewsListing.VerificationStatus.PENDING)
+
+    def test_license_only_edit_on_submitted_listing_leaves_verification_untouched(self):
+        resp = self.client.patch(f"/api/news/listings/{self.listing.slug}/", {"license_territory": "Tanzania only"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.listing.refresh_from_db()
+        self.assertEqual(self.listing.verification_status, NewsListing.VerificationStatus.NEEDS_HUMAN_REVIEW)
+
+
 class FreePreviewQuotaTests(APITestCase):
     def setUp(self):
         self.seller = make_seller()
@@ -529,6 +695,98 @@ class FreePreviewQuotaTests(APITestCase):
         self.assertFalse(resp.data["body_locked"])
         self.assertFalse(resp.data["is_free_preview"])
         self.assertEqual(FreePreviewGrant.objects.count(), 0)
+
+
+class MediaPaywallTests(APITestCase):
+    """The listing's `body` has always been gated behind purchase/access;
+    `media[].file` (the full-resolution asset) was not -- anyone could
+    read it straight off the listing detail response regardless of
+    body_locked. This locks that down the same way, falling back to the
+    watermarked preview generated on upload (news/media_preview.py)
+    instead of silently leaking the original."""
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.seller = make_seller()
+        self.buyer = make_buyer()
+        self.moderator = User.objects.create_user(
+            username="modpw1", email="modpw1@example.com", password="pw12345678!", role=User.Role.MODERATOR,
+        )
+        self.listing = NewsListing.objects.create(
+            seller=self.seller, title="t", description="d", body="paywalled body", news_type=NewsListing.NewsType.TEXT,
+            category=make_category(), price=Decimal("1000"), status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status=NewsListing.VerificationStatus.VERIFIED,
+        )
+        self.client.force_authenticate(self.seller)
+        upload_resp = self.client.post(
+            f"/api/news/listings/{self.listing.slug}/media/",
+            {"media_type": "image", "file": SimpleUploadedFile("photo.jpg", make_real_jpeg_bytes(), content_type="image/jpeg"), "is_cover": True},
+            format="multipart",
+        )
+        self.assertEqual(upload_resp.status_code, status.HTTP_201_CREATED)
+        self.media_id = upload_resp.data["id"]
+        self.client.force_authenticate(None)
+
+    def test_anonymous_visitor_never_sees_the_full_resolution_file(self):
+        from .models import NewsMedia
+
+        original_file_url = NewsMedia.objects.get(pk=self.media_id).file.url
+        resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        media = resp.data["media"][0]
+        self.assertNotEqual(media["file"], original_file_url)
+        # Not just withheld -- a watermarked stand-in was actually served,
+        # and `file` falls back to exactly that (the frontend's existing
+        # `m.file || m.preview_file` rendering already expects this).
+        self.assertTrue(media["preview_file"])
+        self.assertEqual(media["file"], media["preview_file"])
+
+    def test_paid_buyer_gets_the_full_resolution_file(self):
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        media = resp.data["media"][0]
+        self.assertIsNotNone(media["file"])
+        self.assertNotEqual(media["file"], media["preview_file"])
+
+    def test_buyer_without_access_is_still_locked(self):
+        from django.test import override_settings
+
+        from .models import NewsMedia
+
+        original_file_url = NewsMedia.objects.get(pk=self.media_id).file.url
+        with override_settings(FREE_PREVIEW_QUOTA_PER_MONTH=0):
+            self.client.force_authenticate(self.buyer)
+            resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        self.assertNotEqual(resp.data["media"][0]["file"], original_file_url)
+
+    def test_seller_always_sees_their_own_full_resolution_file(self):
+        self.client.force_authenticate(self.seller)
+        resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        self.assertIsNotNone(resp.data["media"][0]["file"])
+
+    def test_moderator_always_sees_the_full_resolution_file(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        self.assertIsNotNone(resp.data["media"][0]["file"])
+
+    def test_video_media_has_no_preview_and_is_withheld_entirely_when_locked(self):
+        # Created directly via the ORM rather than the upload endpoint --
+        # content-sniffing validation on that endpoint (core/validators.py)
+        # would reject a fake .mp4 payload, which isn't what's under test
+        # here (that's covered by news/tests upload-validation tests).
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from .models import NewsMedia
+
+        NewsMedia.objects.create(
+            listing=self.listing, media_type=NewsMedia.MediaType.VIDEO,
+            file=SimpleUploadedFile("clip.mp4", b"not-a-real-video-file-contents", content_type="video/mp4"),
+        )
+        resp = self.client.get(f"/api/news/listings/{self.listing.slug}/")
+        video_item = next(m for m in resp.data["media"] if m["media_type"] == "video")
+        self.assertIsNone(video_item["file"])
+        self.assertFalse(video_item["preview_file"])
 
 
 class DownloadAndSocialShareAccessTests(APITestCase):

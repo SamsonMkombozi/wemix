@@ -171,14 +171,47 @@ class NewsListingViewSet(viewsets.ModelViewSet):
                 recent_view_count=Count("view_logs", filter=Q(view_logs__created_at__gte=week_ago))
             ).order_by("-recent_view_count")
             return qs
+        relevance_ordered = False
         if q:
+            # Real relevance ranking instead of exact-substring matching:
+            # title weighted highest, then description/tags, then the
+            # (often long, sometimes paywalled but still worth matching
+            # against) body. `websearch` query syntax parses a plain
+            # search-box string (quoted phrases, -exclusions) the way a
+            # user actually types one, not raw tsquery syntax. Computed
+            # on the fly rather than a materialized+indexed SearchVector
+            # column -- the straightforward first cut; worth revisiting
+            # with a persisted, GIN-indexed column if this becomes a
+            # query-time bottleneck at real scale.
+            from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
             from django.db.models import Q
 
-            qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q) | Q(tags__name__icontains=q)).distinct()
+            # Tags deliberately excluded from the ranked vector: it's a
+            # joined M2M field, and concatenating a per-join-row value
+            # into the same annotation Django then orders by is a known
+            # footgun (the join can multiply rows with a rank that
+            # differs by which single tag matched, defeating .distinct()).
+            # Matched separately below instead -- tags are short/
+            # structured, so substring matching there is precise enough
+            # without needing rank.
+            search_vector = (
+                SearchVector("title", weight="A")
+                + SearchVector("description", weight="B")
+                + SearchVector("body", weight="C")
+            )
+            search_query = SearchQuery(q, search_type="websearch")
+            qs = qs.annotate(search_rank=SearchRank(search_vector, search_query)).filter(
+                Q(search_rank__gt=0) | Q(tags__name__icontains=q)
+            ).distinct()
+            if not params.get("ordering"):
+                relevance_ordered = True
 
-        allowed_ordering = {"created_at", "-created_at", "price", "-price", "purchase_count", "-purchase_count"}
-        if ordering in allowed_ordering:
-            qs = qs.order_by(ordering)
+        if relevance_ordered:
+            qs = qs.order_by("-search_rank")
+        else:
+            allowed_ordering = {"created_at", "-created_at", "price", "-price", "purchase_count", "-purchase_count"}
+            if ordering in allowed_ordering:
+                qs = qs.order_by(ordering)
         return qs
 
     def get_serializer_context(self):
@@ -247,6 +280,11 @@ class NewsListingViewSet(viewsets.ModelViewSet):
 
         original = serializer.instance
         was_published = original.status == NewsListing.ListingStatus.PUBLISHED
+        # A listing already in the review pipeline (submitted, or live)
+        # has an AI/human verification outcome tied to specific content --
+        # editing that content should invalidate it, same reasoning either
+        # way, just a different resulting status.
+        was_in_review_pipeline = original.status in {NewsListing.ListingStatus.SUBMITTED, NewsListing.ListingStatus.PUBLISHED}
         tracked_fields = ["title", "description", "body", "byline", "dateline", "location"]
         snapshot = {f: getattr(original, f) for f in tracked_fields}
         snapshot["price"] = str(original.price)
@@ -258,15 +296,22 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         content_changed = any(snapshot[f] != getattr(listing, f) for f in tracked_fields) or snapshot["price"] != str(listing.price)
 
         description = "Listing updated."
-        if was_published and content_changed:
+        if content_changed and was_in_review_pipeline:
             # A seller correcting a typo shouldn't be able to silently
             # change a listing's actual content after it already passed
-            # verification and started selling -- pull it back to pending
+            # (or is awaiting) verification -- pull it back to pending
             # re-review, same as the media-upload flagging path does.
+            # A published listing also drops back to submitted (no
+            # longer live/purchasable until re-approved); a
+            # still-submitted one just gets its stale verification
+            # invalidated, no status change needed.
             listing.status = NewsListing.ListingStatus.SUBMITTED
             listing.verification_status = NewsListing.VerificationStatus.PENDING
             listing.save(update_fields=["status", "verification_status", "updated_at"])
-            description = "Listing edited after publishing; pulled back to pending re-review."
+            description = (
+                "Listing edited after publishing; pulled back to pending re-review." if was_published
+                else "Listing edited while awaiting review; verification outcome invalidated."
+            )
 
         log_news_action(
             actor=self.request.user,
@@ -323,7 +368,13 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             request.META.get("REMOTE_ADDR"), request.META.get("HTTP_USER_AGENT", "")[:512],
         )
 
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # In eager mode the task above (including preview generation)
+        # already ran synchronously against media_obj's own DB row --
+        # refresh this in-memory instance so the response reflects the
+        # generated preview_file instead of the pre-task blank value.
+        media_obj.refresh_from_db()
+
+        return Response(NewsMediaSerializer(media_obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="ai-results")
     def ai_results(self, request, slug=None):

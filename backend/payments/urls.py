@@ -15,6 +15,7 @@ urlpatterns = [
     path("webhooks/selcom-subscription/", views.SelcomSubscriptionWebhookView.as_view(), name="selcom-subscription-webhook"),
     path("subscriptions/", views.CreateSubscriptionView.as_view(), name="subscription-create"),
     path("subscriptions/mine/", views.MySubscriptionsView.as_view(), name="my-subscriptions"),
+    path("subscriptions/all/", views.AllSubscriptionsListView.as_view(), name="all-subscriptions"),
     path("subscribers/mine/", views.MySubscribersView.as_view(), name="my-subscribers"),
     path("subscriptions/<uuid:pk>/cancel/", views.SubscriptionCancelView.as_view(), name="subscription-cancel"),
     path("refunds/", views.RefundRequestCreateView.as_view(), name="refund-create"),

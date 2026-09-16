@@ -1,13 +1,16 @@
 /* ==========================================================================
    WEMIX / Habari Platform — design tokens
-   Unified onto the WEMIX editorial identity (navy/blue/red) that already
-   lives on index.html and in the shared header logo (js/nav.js), rather
-   than the older black/gold placeholder this file originally shipped
-   with -- one brand across every screen instead of two competing ones.
+   Black / white / gold editorial identity -- matching the actual wordmark
+   (images/wemix.jpeg: black tiles, white letters, one gold tile) rather
+   than the navy/blue/red palette this file drifted to at one point. One
+   brand across every screen: this file, index.html's scoped homepage
+   styles, and the shared header logo (js/nav.js) all resolve to the same
+   three hues plus white/black neutrals.
    Custom property NAMES are kept as-is (--color-gold, --color-black, ...)
    since every component references them by name; only their VALUES and,
-   where a component paired "gold background + black text" in a way that
-   doesn't hold at the new hues, the specific text-color rule change.
+   where a component paired a fill + text color in a way that doesn't
+   hold at the new hues (e.g. a hover fill going light gold needs dark
+   text, not white), the specific text-color rule change.
    Poppins stays throughout -- it was already index.html's typeface too.
    ========================================================================== */
 
@@ -15,13 +18,13 @@
   --color-bg: #ffffff;
   --color-text: #14141f;
   --color-text-muted: #6b7280;
-  --color-gold: #2f6fed;           /* primary accent (was bright gold) -- WEMIX blue */
-  --color-gold-secondary: #e63946; /* energetic/hover accent -- WEMIX red */
-  --color-gold-dark: #1d4ed8;      /* deep accent for text-on-white (links, eyebrows, focus labels) */
-  --color-black: #0d1b3d;          /* primary dark surface -- WEMIX navy (was pure black) */
+  --color-gold: #c9a227;           /* primary accent -- deep enough for white text on top */
+  --color-gold-secondary: #e8c468; /* lighter hover/highlight gold -- pair with dark text */
+  --color-gold-dark: #8a6d1f;      /* deep accent for text-on-white (links, eyebrows, focus labels) */
+  --color-black: #0d0d0d;          /* primary dark surface -- near-true black */
   --color-border: #e7e9f0;
   --color-card-bg: #ffffff;
-  --color-danger: #e63946;         /* aligned to the one WEMIX red -- also used for breaking/live */
+  --color-danger: #e63946;         /* semantic error/urgency red -- not part of the brand palette */
   --color-success: #1e6b3c;
 
   --font-display: 'Poppins', sans-serif;
@@ -217,11 +220,10 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   transition: background 0.15s, color 0.15s, transform 0.1s, border-color 0.15s;
 }
 
-/* Hover energizes to the red accent (matching WEMIX's own "Watch Live"
-   treatment) rather than inverting to a light fill -- white text stays
-   legible against both the navy default and the red hover state, so
-   there's no contrast recalculation needed on interaction. */
-.btn:hover { background: var(--color-gold-secondary); color: #ffffff; border-color: var(--color-gold-secondary); }
+/* Hover lifts to the lighter gold accent -- text flips to black here
+   since white-on-light-gold doesn't hold the contrast that white-on-
+   black (the default state) does. */
+.btn:hover { background: var(--color-gold-secondary); color: var(--color-black); border-color: var(--color-gold-secondary); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -457,7 +459,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 .auth-form-center, .auth-form-card { min-width: 0; }
 
 .auth-panel-brand {
-  background: linear-gradient(155deg, var(--color-black) 0%, #16265a 60%, #1d2f66 100%);
+  background: linear-gradient(155deg, var(--color-black) 0%, #1a1a1a 60%, #262626 100%);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -512,7 +514,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 }
 
 .auth-panel-content p {
-  color: #c7cfe8;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 0.95rem;
   line-height: 1.6;
   margin: 0;
@@ -533,7 +535,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   align-items: flex-start;
   gap: 10px;
   font-size: 0.86rem;
-  color: #dbe1f3;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .auth-panel-points li::before {
@@ -549,7 +551,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 .auth-panel-foot {
   position: relative;
   font-size: 0.75rem;
-  color: #8b96bd;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .auth-form-col {
@@ -656,7 +658,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 
 .alert-error { background: #fbeceb; color: var(--color-danger); border-color: #f3cfcc; }
 .alert-success { background: #eaf5ee; color: var(--color-success); border-color: #cdeadb; }
-.alert-info { background: #e9f1fb; color: var(--color-gold-dark); border-color: #cfe0f7; }
+.alert-info { background: #faf3e0; color: var(--color-gold-dark); border-color: #f0e0ad; }
 
 .pill {
   display: inline-block;
@@ -669,7 +671,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 }
 
 .pill-verified { background: #eaf5ee; color: var(--color-success); }
-.pill-pending { background: #e9f1fb; color: var(--color-gold-dark); }
+.pill-pending { background: #faf3e0; color: var(--color-gold-dark); }
 .pill-rejected { background: #fbeceb; color: var(--color-danger); }
 
 /* Deliberately NOT the brand accent -- star ratings are a near-universal
@@ -699,7 +701,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   top: -2px;
   right: -2px;
   background: var(--color-gold);
-  color: #ffffff;
+  color: var(--color-black);
   border-radius: 999px;
   font-size: 0.62rem;
   font-weight: 700;
@@ -744,11 +746,11 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   transition: background 0.12s;
 }
 
-.notif-item:hover { background: #f4f6fb; }
+.notif-item:hover { background: #f6f3ea; }
 .notif-item:last-child { border-bottom: none; }
 
-.notif-unread { background: #e9f1fb; }
-.notif-unread:hover { background: #fbf1d9; }
+.notif-unread { background: #faf3e0; }
+.notif-unread:hover { background: #f5e9c8; }
 
 .notif-item-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 2px; }
 .notif-item-message { font-size: 0.78rem; color: var(--color-text-muted); margin-bottom: 4px; }
@@ -791,7 +793,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   height: 34px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: #ffffff;
+  color: var(--color-black);
   border: none;
   font-weight: 700;
   font-size: 0.9rem;
@@ -832,7 +834,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--color-border);
-  background: #f4f6fb;
+  background: #f6f3ea;
 }
 
 .avatar-circle-lg {
@@ -841,7 +843,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   min-width: 42px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: #ffffff;
+  color: var(--color-black);
   font-weight: 700;
   font-size: 1.05rem;
   display: flex;
@@ -872,7 +874,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
   transition: background 0.12s;
 }
 
-.avatar-menu-item:hover { background: #f4f6fb; }
+.avatar-menu-item:hover { background: #f6f3ea; }
 .avatar-menu-item-danger { color: var(--color-danger); }
 .avatar-menu-item-danger:hover { background: #fbecec; }
 
@@ -956,7 +958,7 @@ h3 { font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.3rem); }
 }
 
 .sub-tab.active {
-  color: #ffffff;
+  color: var(--color-black);
   background: var(--color-gold);
 }
 
@@ -1273,7 +1275,7 @@ footer {
   min-width: 44px;
   border-radius: 50%;
   background: var(--color-gold);
-  color: #ffffff;
+  color: var(--color-black);
   font-weight: 700;
   font-size: 1.1rem;
   display: flex;

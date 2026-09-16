@@ -261,6 +261,23 @@ class SubscriptionCancelView(APIView):
         return Response(SubscriptionSerializer(subscription).data)
 
 
+class AllSubscriptionsListView(generics.ListAPIView):
+    """GET /api/payments/subscriptions/all/ -- moderator/admin: every
+    subscription platform-wide, for support/dispute resolution (e.g. a
+    buyer disputes a charge, a seller asks why a subscriber's access
+    lapsed)."""
+
+    serializer_class = SubscriptionSerializer
+    permission_classes = [IsModeratorOrAbove]
+
+    def get_queryset(self):
+        qs = Subscription.objects.select_related("subscriber", "seller").order_by("-created_at")
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
+
 class SelcomSubscriptionWebhookView(APIView):
     """POST /api/payments/webhooks/selcom-subscription/ -- separate from
     the listing-purchase webhook so this newer path can't regress that

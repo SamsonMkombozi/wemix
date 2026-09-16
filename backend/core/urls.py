@@ -15,6 +15,7 @@ urlpatterns = [
     path("audit-log/", views.AuditLogListView.as_view(), name="audit-log"),
     path("api-keys/", views.APIKeyListCreateView.as_view(), name="api-key-list-create"),
     path("api-keys/<uuid:pk>/revoke/", views.APIKeyRevokeView.as_view(), name="api-key-revoke"),
+    path("api-keys/<uuid:pk>/admin-revoke/", views.APIKeyAdminRevokeView.as_view(), name="api-key-admin-revoke"),
     path("terms/status/", views.TermsStatusView.as_view(), name="terms-status"),
     path("terms/accept/", views.TermsAcceptView.as_view(), name="terms-accept"),
     path("support-tickets/", views.SupportTicketListCreateView.as_view(), name="support-ticket-list-create"),

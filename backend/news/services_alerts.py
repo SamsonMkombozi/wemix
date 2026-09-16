@@ -20,6 +20,7 @@ def notify_saved_search_matches(listing) -> int:
             title=f"New story matches your saved search: '{listing.title}'",
             message=listing.description[:200],
             link_path=f"listing.html?slug={listing.slug}",
+            send_sms=True,
         )
         sent += 1
     return sent

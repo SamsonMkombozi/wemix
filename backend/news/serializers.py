@@ -233,7 +233,7 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
     seller_twitter_url = serializers.CharField(source="seller.twitter_url", read_only=True)
     seller_facebook_url = serializers.CharField(source="seller.facebook_url", read_only=True)
     tags = TagSerializer(many=True, read_only=True)
-    media = NewsMediaSerializer(many=True, read_only=True)
+    media = serializers.SerializerMethodField()
     body = serializers.SerializerMethodField()
     body_locked = serializers.SerializerMethodField()
     is_free_preview = serializers.SerializerMethodField()
@@ -342,6 +342,21 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
 
         return consume_free_preview_if_eligible(user, obj)
 
+    def get_media(self, obj):
+        # The full-resolution `file` is exactly as much a paid product as
+        # `body` is -- gated the same way, behind the same _has_access
+        # check (idempotent, safe to call more than once per request;
+        # see consume_free_preview_if_eligible). Pre-purchase, `file`
+        # falls back to the watermarked `preview_file` a media_preview
+        # generates on upload (blank for video/document, which have no
+        # preview asset -- those are withheld outright, not substituted).
+        items = NewsMediaSerializer(obj.media.all(), many=True).data
+        if self._has_access(obj):
+            return items
+        for item in items:
+            item["file"] = item.get("preview_file")
+        return items
+
     def get_body(self, obj):
         return obj.body if self._has_access(obj) else None
 
@@ -402,6 +417,25 @@ class NewsListingWriteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "slug", "status", "verification_status", "reading_time_minutes", "featured"]
 
+    def validate(self, attrs):
+        # License terms are part of what a buyer actually purchased --
+        # changing them after someone has already paid would silently
+        # misrepresent what that buyer bought. Metadata-only fields
+        # (title/body/etc.) can still be corrected; see
+        # NewsListingViewSet.perform_update for the separate
+        # re-verification pullback that content edits trigger.
+        if self.instance and ("license_type" in attrs or "license_territory" in attrs):
+            new_type = attrs.get("license_type", self.instance.license_type)
+            new_territory = attrs.get("license_territory", self.instance.license_territory)
+            if new_type != self.instance.license_type or new_territory != self.instance.license_territory:
+                from payments.models import Order
+
+                if Order.objects.filter(listing=self.instance, status=Order.Status.PAID).exists():
+                    raise serializers.ValidationError(
+                        "License terms can't be changed after a buyer has already purchased this listing."
+                    )
+        return attrs
+
     def create(self, validated_data):
         tags = validated_data.pop("tags", [])
         request = self.context["request"]
@@ -414,9 +448,12 @@ class NewsListingWriteSerializer(serializers.ModelSerializer):
         tags = validated_data.pop("tags", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-        # Any edit to sellable content should re-trigger AI review rather
-        # than silently keeping a stale verification status.
-        instance.verification_status = NewsListing.VerificationStatus.PENDING
+        # Verification-status reset is handled by the view
+        # (NewsListingViewSet.perform_update), conditional on whether
+        # actual sellable content changed -- not unconditionally here,
+        # which previously reset it on *any* edit (e.g. just changing
+        # the license terms), leaving a PUBLISHED listing showing a
+        # contradictory "pending" verification status for no reason.
         instance.save()
         if tags is not None:
             instance.tags.set(tags)

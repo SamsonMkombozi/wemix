@@ -332,6 +332,7 @@ def _notify_sale_completed(order) -> None:
         title=f"You made a sale: '{order.listing.title}'",
         message=f"{order.listing.seller_earning} {order.currency} was credited to your wallet.",
         link_path="dashboard.html?tab=withdrawals",
+        send_sms=True,
     )
 
 

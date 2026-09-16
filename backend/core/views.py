@@ -327,6 +327,39 @@ class APIKeyRevokeView(APIView):
         return Response(APIKeySerializer(api_key).data)
 
 
+class UserAPIKeyListView(generics.ListAPIView):
+    """GET /api/accounts/users/<user_id>/api-keys/ -- moderator/admin:
+    a specific user's API keys, for security review (e.g. a compromised
+    account). Read-only here; revocation reuses APIKeyAdminRevokeView
+    below rather than letting staff hit the self-service revoke route."""
+
+    serializer_class = APIKeySerializer
+    permission_classes = [IsModeratorOrAbove]
+    pagination_class = None
+
+    def get_queryset(self):
+        return APIKey.objects.filter(user_id=self.kwargs["user_id"])
+
+
+class APIKeyAdminRevokeView(APIView):
+    """POST /api/api-keys/<id>/admin-revoke/ -- moderator/admin can
+    revoke ANY user's key (unlike APIKeyRevokeView, which only lets a
+    user revoke their own) -- the incident-response path for a
+    compromised account."""
+
+    permission_classes = [IsModeratorOrAbove]
+
+    def post(self, request, pk=None):
+        api_key = get_object_or_404(APIKey, pk=pk)
+        api_key.is_active = False
+        api_key.save(update_fields=["is_active", "updated_at"])
+        AuditLog.objects.create(
+            actor=request.user, action=AuditLog.Action.UPDATE, target_model="APIKey", target_id=str(api_key.id),
+            description=f"API key '{api_key.name}' revoked by staff for user {api_key.user_id}.",
+        )
+        return Response(APIKeySerializer(api_key).data)
+
+
 class AuditLogListView(generics.ListAPIView):
     """GET /api/audit-log/ -- moderator/admin only. Recent
     security-relevant actions across the platform, for the moderation

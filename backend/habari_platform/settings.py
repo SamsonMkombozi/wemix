@@ -267,6 +267,14 @@ NALA_WEBHOOK_URL = env(
 AI_VERIFICATION_API_URL = env("AI_VERIFICATION_API_URL", default="")
 AI_VERIFICATION_API_KEY = env("AI_VERIFICATION_API_KEY", default="")
 AI_AUTO_REJECT_THRESHOLD = env.float("AI_AUTO_REJECT_THRESHOLD", default=80.0)
+
+# ------------------------------------------------------------------
+# KYC face-match / liveness (external vendor -- Jumio/Onfido/Veriff/etc).
+# Same honest-placeholder pattern as AI_VERIFICATION_API_URL: a genuine
+# no-op until a real vendor is configured. See accounts/face_match.py.
+# ------------------------------------------------------------------
+KYC_FACE_MATCH_API_URL = env("KYC_FACE_MATCH_API_URL", default="")
+KYC_FACE_MATCH_API_KEY = env("KYC_FACE_MATCH_API_KEY", default="")
 AI_AUTO_VERIFY_THRESHOLD = env.float("AI_AUTO_VERIFY_THRESHOLD", default=20.0)
 
 # ------------------------------------------------------------------
@@ -283,6 +291,22 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Habari Platform <no-reply@habariplatform.co.tz>")
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
+
+# ------------------------------------------------------------------
+# SMS (Africa's Talking) -- for the small set of notifications time-
+# sensitive enough that email alone isn't enough reach in a mobile-
+# money-first market (sale confirmations, saved-search "breaking"
+# alerts; see core/sms_client.py and core/notifications.py). Same
+# honest-placeholder-until-confirmed tier as Selcom: built from Africa's
+# Talking's public API docs, not verified against a live account from
+# this sandbox. A genuine no-op with zero behavior change if
+# AFRICASTALKING_API_KEY is unset, which it is by default everywhere
+# until someone provisions a real account.
+# ------------------------------------------------------------------
+AFRICASTALKING_API_KEY = env("AFRICASTALKING_API_KEY", default="")
+AFRICASTALKING_USERNAME = env("AFRICASTALKING_USERNAME", default="")
+AFRICASTALKING_SENDER_ID = env("AFRICASTALKING_SENDER_ID", default="")
+AFRICASTALKING_BASE_URL = env("AFRICASTALKING_BASE_URL", default="https://api.sandbox.africastalking.com/version1")
 
 # ------------------------------------------------------------------
 # Celery (async task queue) -- AI verification, OCR, and image analysis

@@ -1,6 +1,8 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from core.views import UserAPIKeyListView
+
 from . import views
 
 app_name = "accounts"
@@ -22,6 +24,7 @@ urlpatterns = [
     path("users/<uuid:user_id>/set-password/", views.UserSetPasswordView.as_view(), name="user-set-password"),
     path("users/<uuid:user_id>/reverse-status/", views.UserReverseStatusView.as_view(), name="user-reverse-status"),
     path("users/<uuid:user_id>/toggle-verified-badge/", views.ToggleVerifiedBadgeView.as_view(), name="toggle-verified-badge"),
+    path("users/<uuid:user_id>/api-keys/", UserAPIKeyListView.as_view(), name="user-api-keys"),
     path("kyc/", views.IdentityVerificationCreateListView.as_view(), name="kyc-list-create"),
     path("kyc/queue/", views.IdentityVerificationReviewQueueView.as_view(), name="kyc-queue"),
     path("kyc/<uuid:pk>/review/", views.IdentityVerificationReviewDetailView.as_view(), name="kyc-review"),

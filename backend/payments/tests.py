@@ -296,3 +296,40 @@ class SubscriptionTests(APITestCase):
         self.client.force_authenticate(other)
         resp = self.client.post(f"/api/payments/subscriptions/{subscription.id}/cancel/")
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_moderator_can_list_all_subscriptions(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        Subscription.objects.create(
+            subscriber=self.buyer, seller=self.seller, price=Decimal("5000"),
+            status=Subscription.Status.ACTIVE, current_period_end=timezone.now() + timedelta(days=10),
+        )
+        moderator = User.objects.create_user(username="mod2", email="mod2@example.com", password="pw12345678!", role=User.Role.MODERATOR)
+        self.client.force_authenticate(moderator)
+        resp = self.client.get("/api/payments/subscriptions/all/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data["results"]), 1)
+
+    def test_buyer_cannot_list_all_subscriptions(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.get("/api/payments/subscriptions/all/")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_all_subscriptions_filterable_by_status(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        Subscription.objects.create(
+            subscriber=self.buyer, seller=self.seller, price=Decimal("5000"),
+            status=Subscription.Status.ACTIVE, current_period_end=timezone.now() + timedelta(days=10),
+        )
+        Subscription.objects.create(
+            subscriber=make_buyer("otherbuyer3"), seller=self.seller, price=Decimal("5000"),
+            status=Subscription.Status.EXPIRED, current_period_end=timezone.now() - timedelta(days=1),
+        )
+        moderator = User.objects.create_user(username="mod3", email="mod3@example.com", password="pw12345678!", role=User.Role.MODERATOR)
+        self.client.force_authenticate(moderator)
+        resp = self.client.get("/api/payments/subscriptions/all/?status=expired")
+        self.assertEqual(len(resp.data["results"]), 1)
+        self.assertEqual(resp.data["results"][0]["status"], "expired")

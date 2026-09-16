@@ -64,7 +64,7 @@ gate.innerHTML = `
     const termsStatus = await apiFetch('/api/terms/status/');
     if (termsStatus.needs_acceptance) {
       document.getElementById('terms-banner').innerHTML = `
-        <div class="alert alert-info" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+        <div class="alert alert-info" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:var(--space-4);">
           <span>Our <a href="terms.html" target="_blank" style="font-weight:600;">Terms &amp; Conditions</a> have been updated (v${escapeHtml(termsStatus.current_version)}). Please review and re-accept to continue.</span>
           <button class="btn btn-sm" id="terms-reaccept-btn">I accept</button>
         </div>
@@ -221,7 +221,7 @@ async function loadMe() {
     Auth.setSession({ user: me });
     const kycMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' };
     el.innerHTML = `
-      <h3 style="margin-bottom:4px;">${escapeHtml(me.username)}</h3>
+      <h3 style="margin-bottom:var(--space-1);">${escapeHtml(me.username)}</h3>
       <p class="text-muted" style="margin:0 0 12px 0; font-size:0.85rem;">${escapeHtml(me.email)}</p>
       <p style="font-size:0.85rem;">Role: <strong>${escapeHtml((me.role || '').replace('_', ' '))}</strong></p>
       <p style="font-size:0.85rem;">ID verification: ${pillForStatus(me.id_verification_status, kycMap)}</p>
@@ -275,7 +275,7 @@ async function renderListingsTab(content) {
       return;
     }
     content.innerHTML = results.map((l) => `
-      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
         <div class="flex-between">
           <div>
             <h3 style="margin:0 0 6px 0;">${escapeHtml(l.title)}</h3>
@@ -283,7 +283,7 @@ async function renderListingsTab(content) {
           </div>
           <div style="text-align:right;">
             ${pillForStatus(l.status, statusMap)}
-            <div style="margin-top:8px;">
+            <div style="margin-top:var(--space-2);">
               ${l.status === 'draft' ? `<button class="btn btn-sm submit-btn" data-slug="${l.slug}">Submit for review</button>` : ''}
               <button class="btn btn-ghost btn-sm edit-toggle-btn" data-slug="${l.slug}">Edit</button>
               <button class="btn btn-ghost btn-sm media-toggle-btn" data-slug="${l.slug}">Add media</button>
@@ -301,7 +301,7 @@ async function renderListingsTab(content) {
               <label for="correction-text-${l.slug}">Correction text (visible to everyone, and emailed to every past buyer)</label>
               <textarea id="correction-text-${l.slug}" style="min-height:60px;" required></textarea>
             </div>
-            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:var(--space-3);">
               <input type="checkbox" id="correction-retraction-${l.slug}" style="width:auto;">
               This is a retraction (the story is materially wrong, not just amended)
             </label>
@@ -325,11 +325,11 @@ async function renderListingsTab(content) {
                 <input type="file" id="media-file-${l.slug}" accept="image/*,video/*" required>
               </div>
             </div>
-            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:12px;">
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:var(--space-3);">
               <input type="checkbox" id="media-cover-${l.slug}" checked style="width:auto;">
               Use as cover image
             </label>
-            <details style="margin-bottom:12px;">
+            <details style="margin-bottom:var(--space-3);">
               <summary style="cursor:pointer; font-size:0.82rem; color:var(--color-text-muted);">Wire metadata (optional)</summary>
               <div class="field-row" style="margin-top:10px;">
                 <div class="form-group">
@@ -486,7 +486,7 @@ async function loadCorrectionHistory(slug, area) {
   try {
     const corrections = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/corrections/`, { auth: false });
     historyEl.innerHTML = corrections.length ? corrections.map((c) => `
-      <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:8px;">
+      <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:var(--space-2);">
         <strong>${c.is_retraction ? 'Retraction' : 'Correction'} &middot; ${timeAgo(c.created_at)}</strong>
         <p style="margin:4px 0 0 0;">${escapeHtml(c.text)}</p>
       </div>
@@ -537,10 +537,25 @@ async function loadEditForm(slug, area) {
             <input type="number" id="edit-price-${slug}" min="0" step="1" value="${listing.price}" required>
           </div>
         </div>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="edit-license-type-${slug}">License</label>
+            <select id="edit-license-type-${slug}" ${listing.purchase_count > 0 ? 'disabled' : ''}>
+              <option value="standard" ${listing.license_type === 'standard' ? 'selected' : ''}>Standard (non-exclusive, digital use)</option>
+              <option value="exclusive" ${listing.license_type === 'exclusive' ? 'selected' : ''}>Exclusive (one buyer only)</option>
+              <option value="broadcast" ${listing.license_type === 'broadcast' ? 'selected' : ''}>Includes broadcast rights (non-exclusive)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-license-territory-${slug}">Territory</label>
+            <input type="text" id="edit-license-territory-${slug}" value="${escapeHtml(listing.license_territory || 'Worldwide')}" ${listing.purchase_count > 0 ? 'disabled' : ''}>
+          </div>
+        </div>
+        ${listing.purchase_count > 0 ? `<p class="form-hint">License terms are locked -- at least one buyer already purchased this listing under the terms shown.</p>` : ''}
         <button type="submit" class="btn btn-sm" id="edit-save-btn-${slug}">Save changes</button>
         <button type="button" class="btn btn-ghost btn-sm edit-history-toggle" data-slug="${slug}">View edit history</button>
       </form>
-      <div class="hidden" id="edit-history-${slug}" style="margin-top:12px;"></div>
+      <div class="hidden" id="edit-history-${slug}" style="margin-top:var(--space-3);"></div>
     `;
 
     mountLocationPicker(document.getElementById(`edit-location-wrap-${slug}`), `edit-location-${slug}`, listing.location || '');
@@ -563,6 +578,8 @@ async function loadEditForm(slug, area) {
             dateline: document.getElementById(`edit-dateline-${slug}`).value,
             location: document.getElementById(`edit-location-${slug}`).value,
             price: document.getElementById(`edit-price-${slug}`).value,
+            license_type: document.getElementById(`edit-license-type-${slug}`).value,
+            license_territory: document.getElementById(`edit-license-territory-${slug}`).value,
           },
         });
         alertBox.innerHTML = `<div class="alert alert-success">Saved.</div>`;
@@ -609,7 +626,7 @@ async function loadCorporateCard(me) {
     const latest = submissions[0];
 
     card.innerHTML = `
-      <div class="flex-between" style="margin-bottom:4px;">
+      <div class="flex-between" style="margin-bottom:var(--space-1);">
         <h4 style="margin:0;">Corporate account</h4>
         ${me.is_corporate ? '<span class="pill pill-verified">&#10003; Verified organization</span>' : (latest ? pillForStatus(latest.status, kybMap) : '')}
       </div>
@@ -701,8 +718,8 @@ async function renderVerificationTab(content) {
     const history = submissions.results || submissions;
 
     content.innerHTML = `
-      <div class="card" style="padding:22px; margin-bottom:20px;">
-        <div class="flex-between" style="margin-bottom:4px;">
+      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
+        <div class="flex-between" style="margin-bottom:var(--space-1);">
           <h3 style="margin:0;">Identity verification</h3>
           ${pillForStatus(me.id_verification_status, { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' })}
         </div>
@@ -749,7 +766,7 @@ async function renderVerificationTab(content) {
       </div>
 
       ${['journalist', 'media_house'].includes(me.role) ? `
-        <div class="card" style="padding:18px 22px; margin-bottom:20px;">
+        <div class="card" style="padding:18px 22px; margin-bottom:var(--space-5);">
           <div class="flex-between">
             <span>Journalist tier: <strong>${escapeHtml((me.journalist_tier || 'none').replace('_', ' '))}</strong></span>
             ${me.is_press_credentialed ? '<span class="pill pill-verified">&#10003; Verified Professional Journalist</span>' : (me.journalist_tier === 'professional' ? '<span class="pill pill-pending">Press credential pending</span>' : '')}
@@ -768,12 +785,12 @@ async function renderVerificationTab(content) {
       `).join('') : '<p class="text-muted">No submissions yet.</p>'}
 
       ${me.role === 'buyer' ? `
-        <div class="card" id="corporate-card" style="padding:22px; margin-top:24px;">
+        <div class="card" id="corporate-card" style="padding:22px; margin-top:var(--space-6);">
           <p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
         </div>
       ` : ''}
 
-      <div class="card" style="padding:22px; margin-top:24px; border-color:#f3cfcc;">
+      <div class="card" style="padding:22px; margin-top:var(--space-6); border-color:#f3cfcc;">
         <h4 style="margin-top:0; color:var(--color-danger);">Danger zone</h4>
         <p class="text-muted" style="font-size:0.85rem;">Deactivating your account blocks future login and unpublishes your live listings. Buyers who already purchased from you keep access. This cannot be undone by you -- contact support to reactivate.</p>
         <div id="deactivate-alert"></div>
@@ -855,7 +872,7 @@ async function renderCreateTab(content) {
   } catch (e) { /* fall through with empty list */ }
 
   content.innerHTML = `
-    <div class="card" style="padding:24px;">
+    <div class="card" style="padding:var(--space-6);">
       <div id="create-alert"></div>
       <form id="create-form">
         <div class="form-group">
@@ -1035,7 +1052,7 @@ async function renderBookmarksTab(content) {
           </div>
           <div style="text-align:right;">
             ${pillForStatus(b.listing.status, statusMap)}
-            <div style="margin-top:8px;">
+            <div style="margin-top:var(--space-2);">
               <button class="btn btn-outline btn-sm bookmark-remove-btn" data-slug="${b.listing.slug}">Remove</button>
             </div>
           </div>
@@ -1070,7 +1087,7 @@ async function renderPurchasesTab(content) {
     }
     const statusMap = { paid: 'pill-verified', pending_payment: 'pill-pending', failed: 'pill-rejected', cancelled: 'pill-rejected', refunded: 'pill-draft' };
     content.innerHTML = results.map((o) => `
-      <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+      <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
         <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:8px;">
           <div>
             <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" style="font-weight:600;">${escapeHtml(o.listing_title)}</a>
@@ -1078,7 +1095,7 @@ async function renderPurchasesTab(content) {
           </div>
           ${o.status === 'paid' ? `<button class="btn btn-outline btn-sm refund-request-btn" data-order-id="${o.id}" data-title="${escapeHtml(o.listing_title)}">Request refund</button>` : ''}
         </div>
-        <div class="refund-form-area hidden" id="refund-form-${o.id}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
+        <div class="refund-form-area hidden" id="refund-form-${o.id}" style="margin-top:var(--space-3); padding-top:var(--space-3); border-top:1px solid var(--color-border);"></div>
       </div>
     `).join('');
 
@@ -1132,7 +1149,7 @@ async function renderWithdrawalsTab(content) {
     const payoutStatusMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected' };
 
     content.innerHTML = `
-      <div class="card" style="padding:22px; margin-bottom:20px;">
+      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Payout accounts</h3>
         <p class="text-muted" style="margin-top:-8px;">Add a mobile money or bank account. A moderator verifies it once, then you can withdraw to it anytime.</p>
         <div id="payout-alert"></div>
@@ -1145,7 +1162,7 @@ async function renderWithdrawalsTab(content) {
           </div>
         `).join('') : '<p class="text-muted">No payout accounts yet -- add one below.</p>'}
 
-        <form id="payout-form" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--color-border);">
+        <form id="payout-form" style="margin-top:var(--space-4); padding-top:var(--space-4); border-top:1px solid var(--color-border);">
           <div class="field-row">
             <div class="form-group">
               <label for="p-type">Account type</label>
@@ -1173,7 +1190,7 @@ async function renderWithdrawalsTab(content) {
         </form>
       </div>
 
-      <div class="card" style="padding:22px; margin-bottom:20px;">
+      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Request a withdrawal</h3>
         <p class="text-muted" style="margin-top:-8px;">Available balance: <strong>${money(walletData.wallet.available_balance, walletData.wallet.currency)}</strong>${Number(walletData.wallet.pending_balance) > 0 ? ` <span class="text-muted">(${money(walletData.wallet.pending_balance, walletData.wallet.currency)} held from recent sales)</span>` : ''}</p>
         <div id="withdraw-alert"></div>
@@ -1277,7 +1294,7 @@ async function renderWithdrawalsTab(content) {
 
 async function renderSupportTab(content) {
   content.innerHTML = `
-    <div class="card" style="padding:20px; margin-bottom:20px;">
+    <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
       <h3 style="margin-top:0;">New support request</h3>
       <div id="ticket-alert"></div>
       <form id="ticket-form">
@@ -1343,7 +1360,7 @@ async function renderSupportTab(content) {
           ` : ''}
           ${t.status !== 'closed' ? `
             <div style="margin-top:10px; display:flex; gap:8px;">
-              <input type="text" class="ticket-reply-input" data-id="${t.id}" placeholder="Add a reply&hellip;" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+              <input type="text" class="ticket-reply-input" data-id="${t.id}" placeholder="Add a reply&hellip;" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
               <button class="btn btn-sm ticket-reply-btn" data-id="${t.id}">Send</button>
             </div>
           ` : ''}
@@ -1422,7 +1439,7 @@ async function renderSubscriptionsTab(content) {
 
     content.innerHTML = `
       ${isSeller ? `
-        <div class="card" style="padding:20px; margin-bottom:20px;">
+        <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
           <h3 style="margin-top:0;">Offer subscriptions</h3>
           <p class="text-muted" style="margin-top:-8px;">Set a monthly price and buyers can subscribe to unlock everything you publish, instead of buying each story one at a time.</p>
           <div id="sub-price-alert"></div>
@@ -1433,7 +1450,7 @@ async function renderSubscriptionsTab(content) {
             </div>
           </div>
           <button class="btn btn-sm" id="sub-price-save">Save</button>
-          <h4 style="margin-top:24px; margin-bottom:10px;">My subscribers (${subscribers.length})</h4>
+          <h4 style="margin-top:var(--space-6); margin-bottom:10px;">My subscribers (${subscribers.length})</h4>
           ${subscribers.length ? subscribers.map((s) => `
             <div class="table-row">
               <span>${escapeHtml(s.subscriber_username)}</span>
@@ -1448,7 +1465,7 @@ async function renderSubscriptionsTab(content) {
       <h4 style="margin-bottom:10px;">Sellers I'm subscribed to</h4>
       <div id="my-subs-list">
         ${mine.length ? mine.map((s) => `
-          <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+          <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
             <div class="flex-between">
               <div>
                 <strong>${escapeHtml(s.seller_username)}</strong> &middot; ${money(s.price)}/mo
@@ -1497,7 +1514,7 @@ async function renderSubscriptionsTab(content) {
 
 async function renderAlertsTab(content) {
   content.innerHTML = `
-    <div class="card" style="padding:20px; margin-bottom:20px;">
+    <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
       <h3 style="margin-top:0;">New alert</h3>
       <p class="text-muted" style="margin-top:-8px;">Get notified the moment a new verified story matches your filter.</p>
       <div id="alert-create-alert"></div>
@@ -1596,12 +1613,12 @@ async function renderAlertsTab(content) {
 
 async function renderDeveloperTab(content) {
   content.innerHTML = `
-    <div class="card" style="padding:20px; margin-bottom:20px;">
+    <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
       <h3 style="margin-top:0;">Your data</h3>
       <p class="text-muted" style="margin-top:-8px;">Download everything WEMIX has on your account -- profile, listings, orders, wallet history, and more -- as a JSON file.</p>
       <button class="btn btn-outline btn-sm" id="export-data-btn">Export my data</button>
     </div>
-    <div class="card" style="padding:20px;">
+    <div class="card" style="padding:var(--space-5);">
       <h3 style="margin-top:0;">API keys</h3>
       <p class="text-muted" style="margin-top:-8px;">For enterprise/newsroom integrations that need programmatic access instead of a browser login. Send it as <code>Authorization: Api-Key &lt;key&gt;</code>.</p>
       <div id="apikey-alert"></div>
@@ -1612,8 +1629,8 @@ async function renderDeveloperTab(content) {
         </div>
       </div>
       <button class="btn btn-sm" id="apikey-create-btn">Generate new key</button>
-      <div id="apikey-new-value" style="margin-top:12px;"></div>
-      <h4 style="margin-top:20px; margin-bottom:10px;">Your keys</h4>
+      <div id="apikey-new-value" style="margin-top:var(--space-3);"></div>
+      <h4 style="margin-top:var(--space-5); margin-bottom:10px;">Your keys</h4>
       <div id="apikey-list"></div>
     </div>
   `;
@@ -1683,7 +1700,7 @@ async function renderDeveloperTab(content) {
       document.getElementById('apikey-new-value').innerHTML = `
         <div class="alert alert-success">
           <strong>Copy this now -- it won't be shown again:</strong>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <div style="display:flex; gap:8px; align-items:center; margin-top:var(--space-2);">
             <input type="text" readonly value="${escapeHtml(result.raw_key)}" style="flex:1; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="apikey-raw-input">
             <button class="btn btn-sm" id="apikey-copy-btn">Copy</button>
           </div>

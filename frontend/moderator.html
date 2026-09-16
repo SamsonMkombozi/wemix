@@ -138,7 +138,7 @@ async function init() {
   CURRENT_USER = me;
 
   gate.innerHTML = `
-    <h1 style="margin-bottom:4px;">Moderation</h1>
+    <h1 style="margin-bottom:var(--space-1);">Moderation</h1>
     <p class="text-muted" style="margin-top:0;">Signed in as ${escapeHtml(me.username)} (${escapeHtml(me.role)})</p>
     <div class="dash-tabs">
       <div class="dash-tab active" data-tab="verifications">Verifications</div>
@@ -185,6 +185,7 @@ function renderTab(tab) {
       { key: 'sales', label: 'Sales', render: renderSalesTab },
       { key: 'refunds', label: 'Refunds', render: renderRefundsQueue },
       { key: 'withdrawals', label: 'Withdrawals', render: renderWithdrawalsQueue },
+      { key: 'subscriptions', label: 'Subscriptions', render: renderSubscriptionsTab },
       { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
       { key: 'wallet', label: 'Platform wallet & commissions', render: renderPlatformWallet },
     ], 'sales');
@@ -214,12 +215,12 @@ async function renderVerificationQueue(content) {
       return;
     }
     content.innerHTML = results.map((v) => `
-      <div class="card" style="padding:20px; margin-bottom:14px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom:14px;">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <h3 style="margin:0 0 4px 0;">${escapeHtml((v.id_type || '').toUpperCase())} submission</h3>
             <p class="text-muted" style="margin:0 0 10px 0; font-size:0.85rem;">Submitted ${timeAgo(v.created_at)}</p>
-            <div style="display:flex; gap:10px; margin-bottom:12px;">
+            <div style="display:flex; gap:10px; margin-bottom:var(--space-3);">
               <a href="${v.front_image}" target="_blank"><img src="${v.front_image}" alt="ID front" style="width:120px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
               <a href="${v.selfie_image}" target="_blank"><img src="${v.selfie_image}" alt="Selfie" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
             </div>
@@ -230,8 +231,8 @@ async function renderVerificationQueue(content) {
           </div>
           <div style="min-width:220px;">
             <div id="kyc-alert-${v.id}"></div>
-            <button class="btn btn-sm btn-block kyc-approve" data-id="${v.id}" style="margin-bottom:8px;">Approve</button>
-            <input type="text" class="kyc-reason" data-id="${v.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-sm btn-block kyc-approve" data-id="${v.id}" style="margin-bottom:var(--space-2);">Approve</button>
+            <input type="text" class="kyc-reason" data-id="${v.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block kyc-reject" data-id="${v.id}">Reject</button>
           </div>
         </div>
@@ -278,19 +279,25 @@ function renderListingFullDetails(listing) {
             previewHtml = `<video src="${src}" controls preload="metadata" style="width:140px;height:90px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);background:#000;"></video>`;
           } else if (m.media_type === 'document') {
             previewHtml = `
-              <a href="${src}" target="_blank" rel="noopener" style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100px; height:70px; border-radius:6px; border:1px solid var(--color-border); background:#f4f6fb; text-decoration:none; color:var(--color-text);">
+              <a href="${src}" target="_blank" rel="noopener" style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100px; height:70px; border-radius:6px; border:1px solid var(--color-border); background:#f6f3ea; text-decoration:none; color:var(--color-text);">
                 <span style="font-size:1.4rem;">📄</span>
                 <span class="text-muted" style="font-size:0.65rem; padding:0 4px; word-break:break-all;">${escapeHtml(filename)}</span>
               </a>`;
           } else {
             previewHtml = `<img src="${m.preview_file || m.file}" alt="" class="mod-media-zoom" data-full="${src}" style="width:100px;height:70px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:zoom-in;">`;
           }
+          const wireBits = [];
+          if (m.credit_line) wireBits.push(escapeHtml(m.credit_line));
+          if (m.capture_date) wireBits.push(new Date(m.capture_date).toLocaleDateString());
+          if (m.gps_latitude != null && m.gps_longitude != null) wireBits.push(`${m.gps_latitude}, ${m.gps_longitude}`);
+          if (m.keywords) wireBits.push(escapeHtml(m.keywords));
           return `
-          <div style="text-align:center;">
+          <div style="text-align:center; max-width:110px;">
             ${previewHtml}
             <div class="text-muted" style="font-size:0.65rem; margin-top:2px; text-transform:uppercase; letter-spacing:0.03em;">${escapeHtml(m.media_type)}${m.is_cover ? ' &middot; cover' : ''}</div>
             ${m.media_type !== 'image' ? `<a href="${src}" download class="text-muted" style="font-size:0.7rem;">Download</a>` : ''}
             ${(m.analysis_results || []).map((a) => `<div class="text-muted" style="font-size:0.7rem; margin-top:2px;">${a.flagged ? '<span style="color:var(--color-danger);">⚠ flagged</span>' : 'clean'} &middot; manip. ${a.manipulation_score}</div>`).join('')}
+            ${wireBits.length ? `<div class="text-muted" style="font-size:0.62rem; margin-top:var(--space-1); line-height:1.3;">${wireBits.join('<br>')}</div>` : ''}
           </div>
         `;
         }).join('')}
@@ -298,7 +305,7 @@ function renderListingFullDetails(listing) {
     : '<p class="text-muted" style="font-size:0.85rem;">No media attached.</p>';
 
   const tagsHtml = (listing.tags || []).length
-    ? listing.tags.map((t) => `<span class="pill pill-draft" style="margin-right:4px;">${escapeHtml(t.name)}</span>`).join('')
+    ? listing.tags.map((t) => `<span class="pill pill-draft" style="margin-right:var(--space-1);">${escapeHtml(t.name)}</span>`).join('')
     : '<span class="text-muted">none</span>';
 
   return `
@@ -307,15 +314,16 @@ function renderListingFullDetails(listing) {
       <button class="btn btn-outline btn-sm toggle-verified-badge-btn" data-user-id="${listing.seller}" style="padding:2px 8px; font-size:0.75rem;">${listing.seller_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
     </p>
     <p style="font-size:0.8rem;"><strong>Location:</strong> ${escapeHtml(listing.location || 'n/a')} &middot; <strong>Tags:</strong> ${tagsHtml}</p>
-    <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Full story body:</p>
-    <div class="card" style="padding:14px; background:#f4f6fb; margin-bottom:14px;">
+    <p style="font-size:0.8rem;"><strong>License:</strong> ${escapeHtml((listing.license_type || 'standard').replace(/_/g, ' '))} &middot; <strong>Territory:</strong> ${escapeHtml(listing.license_territory || 'Worldwide')}</p>
+    <p style="font-size:0.85rem; font-weight:600; margin-bottom:var(--space-1);">Full story body:</p>
+    <div class="card" style="padding:14px; background:#f6f3ea; margin-bottom:14px;">
       <p style="white-space:pre-wrap; font-size:0.85rem; margin:0;">${escapeHtml(listing.body || '(empty)')}</p>
     </div>
-    <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">Attached media:</p>
+    <p style="font-size:0.85rem; font-weight:600; margin-bottom:var(--space-1);">Attached media:</p>
     ${mediaHtml}
     ${ai ? `
-      <p style="font-size:0.85rem; font-weight:600; margin-bottom:4px;">AI verification breakdown (run ${timeAgo(ai.created_at)}, model: ${escapeHtml(ai.model_name || 'n/a')}):</p>
-      <div style="margin-bottom:8px;">
+      <p style="font-size:0.85rem; font-weight:600; margin-bottom:var(--space-1);">AI verification breakdown (run ${timeAgo(ai.created_at)}, model: ${escapeHtml(ai.model_name || 'n/a')}):</p>
+      <div style="margin-bottom:var(--space-2);">
         ${scoreRow('Fake news score (higher = more likely fake)', ai.fake_news_score, true)}
         ${scoreRow('Misinformation score', ai.misinformation_score, true)}
         ${scoreRow('Clickbait score', ai.clickbait_score, true)}
@@ -327,7 +335,45 @@ function renderListingFullDetails(listing) {
       </div>
       ${ai.human_notes ? `<p class="text-muted" style="font-size:0.8rem;"><strong>Prior human notes:</strong> ${escapeHtml(ai.human_notes)}</p>` : ''}
     ` : '<p class="text-muted" style="font-size:0.85rem;">No AI verification result recorded.</p>'}
+    <p style="font-size:0.85rem; font-weight:600; margin:14px 0 4px 0;">Corrections &amp; retractions:</p>
+    ${(listing.corrections || []).length ? listing.corrections.map((c) => `
+      <div class="card" style="padding:10px 14px; margin-bottom:var(--space-2); ${c.is_retraction ? 'border-color:var(--color-danger);' : ''}">
+        <p style="margin:0; font-size:0.82rem;">${c.is_retraction ? '<strong style="color:var(--color-danger);">RETRACTION</strong>' : '<strong>Correction</strong>'} <span class="text-muted">&middot; ${escapeHtml(c.created_by_username || 'staff')} &middot; ${timeAgo(c.created_at)}</span></p>
+        <p style="margin:4px 0 0 0; font-size:0.85rem;">${escapeHtml(c.text)}</p>
+      </div>
+    `).join('') : '<p class="text-muted" style="font-size:0.85rem;">None posted.</p>'}
+    <div style="margin-top:var(--space-2);">
+      <textarea class="correction-text" placeholder="Correction or retraction text&hellip;" style="width:100%; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
+      <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; margin:6px 0;">
+        <input type="checkbox" class="correction-is-retraction" style="width:auto;"> This is a retraction (materially wrong, not just an amendment)
+      </label>
+      <div id="correction-alert-${listing.slug}"></div>
+      <button class="btn btn-outline btn-sm correction-post-btn" data-slug="${listing.slug}">Post correction</button>
+    </div>
   `;
+}
+
+function wireCorrectionForm(panel, slug, onDone) {
+  const btn = panel.querySelector('.correction-post-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const text = panel.querySelector('.correction-text')?.value.trim();
+    const isRetraction = panel.querySelector('.correction-is-retraction')?.checked || false;
+    const alertBox = document.getElementById(`correction-alert-${slug}`);
+    alertBox.innerHTML = '';
+    if (!text) {
+      alertBox.innerHTML = `<div class="alert alert-error">Correction text is required.</div>`;
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/corrections/`, { method: 'POST', body: { text, is_retraction: isRetraction } });
+      if (onDone) await onDone();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+    }
+  });
 }
 
 function wireVerifiedBadgeButton(panel, onDone) {
@@ -394,7 +440,7 @@ async function renderListingVerificationQueue(content) {
       return;
     }
     const bulkBar = `
-      <div class="card" style="padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div class="card" style="padding:10px 16px; margin-bottom:var(--space-3); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
           <input type="checkbox" id="listmod-select-all" style="width:auto;"> Select all
         </label>
@@ -407,7 +453,7 @@ async function renderListingVerificationQueue(content) {
     content.innerHTML = bulkBar + results.map((l) => {
       const scoreColor = l.ai_score == null ? 'var(--color-text-muted)' : (l.ai_score >= 70 ? 'var(--color-success)' : (l.ai_score >= 40 ? 'var(--color-gold-dark)' : 'var(--color-danger)'));
       return `
-      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <div class="flex-between" style="justify-content:flex-start; gap:10px;">
@@ -425,11 +471,11 @@ async function renderListingVerificationQueue(content) {
             <a href="listing.html?slug=${encodeURIComponent(l.slug)}" target="_blank" class="text-muted" style="font-size:0.8rem;">Open public listing page &rarr;</a>
             &middot;
             <a href="#" class="listmod-toggle-details text-muted" data-slug="${l.slug}" style="font-size:0.8rem; color:var(--color-gold-dark); font-weight:600;">View full details &darr;</a>
-            <div class="listmod-details hidden" id="listmod-details-${l.slug}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
+            <div class="listmod-details hidden" id="listmod-details-${l.slug}" style="margin-top:var(--space-3); padding-top:var(--space-3); border-top:1px solid var(--color-border);"></div>
           </div>
           <div style="min-width:200px;">
             <div id="listmod-alert-${l.slug}"></div>
-            <textarea class="listmod-notes" data-slug="${l.slug}" placeholder="Notes (optional)" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
+            <textarea class="listmod-notes" data-slug="${l.slug}" placeholder="Notes (optional)" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
             <button class="btn btn-sm btn-block listmod-approve" data-slug="${l.slug}" style="margin-bottom:6px;">Approve &amp; publish</button>
             <button class="btn btn-outline btn-sm btn-block listmod-reject" data-slug="${l.slug}">Reject</button>
           </div>
@@ -450,6 +496,7 @@ async function renderListingVerificationQueue(content) {
           panel.dataset.loaded = '1';
           wireVerifiedBadgeButton(panel, loadDetails);
           wireMediaZoom(panel);
+          wireCorrectionForm(panel, slug, loadDetails);
           wireDeletePermanentlyButton(panel, slug, () => renderListingVerificationQueue(content));
         } catch (err) {
           panel.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
@@ -551,7 +598,7 @@ async function renderPayoutAccountsQueue(content) {
           <div style="min-width:200px;">
             <div id="payout-mod-alert-${a.id}"></div>
             <button class="btn btn-sm btn-block payout-mod-verify" data-id="${a.id}" style="margin-bottom:6px;">Verify</button>
-            <input type="text" class="payout-mod-reason" data-id="${a.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="payout-mod-reason" data-id="${a.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block payout-mod-reject" data-id="${a.id}">Reject</button>
           </div>
         </div>
@@ -604,7 +651,7 @@ async function renderCorporateQueue(content) {
           <div style="min-width:200px;">
             <div id="corp-mod-alert-${c.id}"></div>
             <button class="btn btn-sm btn-block corp-mod-verify" data-id="${c.id}" style="margin-bottom:6px;">Verify</button>
-            <input type="text" class="corp-mod-reason" data-id="${c.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="corp-mod-reason" data-id="${c.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block corp-mod-reject" data-id="${c.id}">Reject</button>
           </div>
         </div>
@@ -641,7 +688,7 @@ async function renderUsersTab(content) {
   const isAdmin = ADMIN_ROLES.includes(CURRENT_USER?.role);
 
   content.innerHTML = `
-    <div class="flex-between" style="margin-bottom:16px; align-items:flex-start;">
+    <div class="flex-between" style="margin-bottom:var(--space-4); align-items:flex-start;">
       <div class="field-row" style="flex:1;">
         <input type="text" id="user-search" placeholder="Search username, email, organization&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
         <select id="user-role-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
@@ -661,7 +708,7 @@ async function renderUsersTab(content) {
           <option value="deactivated">Deactivated</option>
         </select>
       </div>
-      ${isAdmin ? `<button class="btn btn-sm" id="user-create-toggle" style="margin-left:12px;">+ New user</button>` : ''}
+      ${isAdmin ? `<button class="btn btn-sm" id="user-create-toggle" style="margin-left:var(--space-3);">+ New user</button>` : ''}
     </div>
     <div id="user-create-form-area"></div>
     <div id="user-list-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
@@ -677,7 +724,7 @@ async function renderUsersTab(content) {
       }
       createArea.dataset.open = '1';
       createArea.innerHTML = `
-        <div class="card" style="padding:18px; margin-bottom:16px; border-color:var(--color-gold);">
+        <div class="card" style="padding:18px; margin-bottom:var(--space-4); border-color:var(--color-gold);">
           <h4 style="margin-top:0;">Create a new user</h4>
           <div id="user-create-alert"></div>
           <div class="field-row">
@@ -837,7 +884,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
   const initial = ((u.first_name || u.username || '?').trim().charAt(0) || '?').toUpperCase();
 
   body.innerHTML = `
-    <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:16px;">
+    <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:var(--space-4);">
       <div class="avatar-circle-lg" style="width:56px; height:56px; font-size:1.3rem;">${u.avatar ? `<img src="${u.avatar}" alt="">` : escapeHtml(initial)}</div>
       <div>
         <p class="text-muted" style="margin:0 0 6px 0; font-size:0.85rem;">${escapeHtml(u.email)} &middot; joined ${timeAgo(u.date_joined)}</p>
@@ -849,7 +896,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       </div>
     </div>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; font-size:0.85rem;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:var(--space-4); font-size:0.85rem;">
       <div><strong>Trust score:</strong> ${u.trust_score}/100</div>
       <div><strong>KYC status:</strong> ${escapeHtml((u.id_verification_status || '').replace('_', ' '))}</div>
       <div><strong>Phone:</strong> ${escapeHtml(u.phone_number || 'n/a')}</div>
@@ -862,7 +909,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       <div id="user-mod-alert"></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div>
-          <select id="user-mod-action" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+          <select id="user-mod-action" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <option value="warning">Warning</option>
             <option value="temporary_suspension">Temporary suspension</option>
             <option value="permanent_ban">Permanent ban</option>
@@ -872,6 +919,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
         </div>
         <div>
           <button class="btn btn-outline btn-sm btn-block" id="user-toggle-badge" style="margin-bottom:6px;">${u.is_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
+          <button class="btn btn-outline btn-sm btn-block" id="user-apikeys-toggle" style="margin-bottom:6px;">API keys</button>
           ${!u.is_deleted ? `<button class="btn btn-outline btn-sm btn-block" id="user-force-deactivate" style="margin-bottom:6px; border-color:var(--color-danger); color:var(--color-danger);">Force deactivate</button>` : ''}
           ${isAdmin ? `
             <button class="btn btn-outline btn-sm btn-block" id="user-edit-toggle" style="margin-bottom:6px;">Edit profile</button>
@@ -879,6 +927,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
           ` : ''}
         </div>
       </div>
+      <div class="hidden" id="user-apikeys-panel" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);"></div>
       ${editFormHtml}
     `}
   `;
@@ -905,6 +954,47 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       afterChange();
     } catch (err) {
       alert(formatApiError(err));
+    }
+  });
+
+  const apiKeysPanel = document.getElementById('user-apikeys-panel');
+  const loadApiKeys = async () => {
+    apiKeysPanel.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
+    try {
+      const keys = await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/api-keys/`);
+      apiKeysPanel.innerHTML = keys.length
+        ? keys.map((k) => `
+          <div class="table-row" style="grid-template-columns: 1fr auto auto auto;">
+            <span>${escapeHtml(k.name)} <span class="text-muted">(${escapeHtml(k.prefix)}&hellip;)</span></span>
+            <span class="text-muted">${k.last_used_at ? `used ${timeAgo(k.last_used_at)}` : 'never used'}</span>
+            <span>${k.is_active ? '<span class="pill pill-verified">active</span>' : '<span class="pill pill-rejected">revoked</span>'}</span>
+            <span>${k.is_active ? `<button class="btn btn-outline btn-sm apikey-revoke-btn" data-id="${k.id}">Revoke</button>` : ''}</span>
+          </div>
+        `).join('')
+        : '<p class="text-muted" style="font-size:0.85rem;">No API keys issued.</p>';
+      apiKeysPanel.querySelectorAll('.apikey-revoke-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Revoke this API key? Any integration using it will stop working immediately.')) return;
+          btn.disabled = true;
+          try {
+            await apiFetch(`/api/api-keys/${encodeURIComponent(btn.dataset.id)}/admin-revoke/`, { method: 'POST' });
+            loadApiKeys();
+          } catch (err) {
+            alert(formatApiError(err));
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (err) {
+      apiKeysPanel.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+  document.getElementById('user-apikeys-toggle').addEventListener('click', () => {
+    const wasHidden = apiKeysPanel.classList.contains('hidden');
+    apiKeysPanel.classList.toggle('hidden');
+    if (wasHidden && !apiKeysPanel.dataset.loaded) {
+      apiKeysPanel.dataset.loaded = '1';
+      loadApiKeys();
     }
   });
 
@@ -979,7 +1069,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       const newPassword = document.getElementById('up-new-password').value;
       try {
         await apiFetch(`/api/accounts/users/${encodeURIComponent(u.id)}/set-password/`, { method: 'POST', body: { new_password: newPassword } });
-        alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:8px;">Password updated.</div>`;
+        alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:var(--space-2);">Password updated.</div>`;
         document.getElementById('up-new-password').value = '';
       } catch (err) {
         alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
@@ -998,7 +1088,7 @@ function debounce(fn, ms) {
 
 async function renderAllListings(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:16px;">
+    <div class="field-row" style="margin-bottom:var(--space-4);">
       <input type="text" id="listing-search" placeholder="Search title/description&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
       <select id="listing-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
         <option value="">All verification statuses</option>
@@ -1047,7 +1137,7 @@ async function renderAllListings(content) {
               <a href="#" class="all-listing-toggle text-muted" data-slug="${l.slug}" style="font-size:0.8rem; color:var(--color-gold-dark); font-weight:600;">Full details &darr;</a>
             </div>
           </div>
-          <div class="all-listing-details hidden" id="all-listing-details-${l.slug}" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border);"></div>
+          <div class="all-listing-details hidden" id="all-listing-details-${l.slug}" style="margin-top:var(--space-3); padding-top:var(--space-3); border-top:1px solid var(--color-border);"></div>
         </div>
       `).join('');
 
@@ -1060,11 +1150,11 @@ async function renderAllListings(content) {
             const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
             let html = renderListingFullDetails(listing);
             html += `
-              <div style="margin-top:12px; display:flex; gap:8px;">
-                <textarea class="all-listing-notes" placeholder="Notes (optional)" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:40px;"></textarea>
+              <div style="margin-top:var(--space-3); display:flex; gap:8px;">
+                <textarea class="all-listing-notes" placeholder="Notes (optional)" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:40px;"></textarea>
               </div>
-              <div id="all-listing-mod-alert-${slug}" style="margin-top:8px;"></div>
-              <div style="margin-top:8px; display:flex; gap:8px;">
+              <div id="all-listing-mod-alert-${slug}" style="margin-top:var(--space-2);"></div>
+              <div style="margin-top:var(--space-2); display:flex; gap:8px;">
                 <button class="btn btn-sm all-listing-approve" data-slug="${slug}">Approve &amp; publish</button>
                 <button class="btn btn-outline btn-sm all-listing-reject" data-slug="${slug}">Reject</button>
               </div>
@@ -1074,6 +1164,7 @@ async function renderAllListings(content) {
             panel.dataset.loaded = '1';
             wireVerifiedBadgeButton(panel, loadDetails);
             wireMediaZoom(panel);
+            wireCorrectionForm(panel, slug, loadDetails);
             wireDeletePermanentlyButton(panel, slug, load);
 
             const doModerate = async (decision) => {
@@ -1126,7 +1217,7 @@ async function renderFlagsQueue(content) {
       return;
     }
     content.innerHTML = results.map((f) => `
-      <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <div class="flex-between" style="justify-content:flex-start; gap:10px;">
@@ -1138,7 +1229,7 @@ async function renderFlagsQueue(content) {
           </div>
           <div style="min-width:200px;">
             <div id="flag-alert-${f.id}"></div>
-            <select class="flag-action" data-id="${f.id}" style="width:100%; margin-bottom:8px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <select class="flag-action" data-id="${f.id}" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
               <option value="warning">Warning</option>
               <option value="temporary_suspension">Temporary suspension</option>
               <option value="permanent_ban">Permanent ban</option>
@@ -1176,7 +1267,7 @@ async function renderFlagsQueue(content) {
 
 async function renderSalesTab(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:16px;">
+    <div class="field-row" style="margin-bottom:var(--space-4);">
       <input type="text" id="sales-search" placeholder="Search buyer/seller/listing&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
       <select id="sales-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
         <option value="">All statuses</option>
@@ -1230,6 +1321,53 @@ async function renderSalesTab(content) {
   document.getElementById('sales-search').addEventListener('input', debounce(load, 400));
   document.getElementById('sales-status-filter').addEventListener('change', load);
   document.getElementById('sales-provider-filter').addEventListener('change', load);
+  load();
+}
+
+async function renderSubscriptionsTab(content) {
+  content.innerHTML = `
+    <div class="field-row" style="margin-bottom:var(--space-4);">
+      <select id="subs-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <option value="">All statuses</option>
+        <option value="pending_payment">Pending payment</option>
+        <option value="active">Active</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="expired">Expired</option>
+      </select>
+    </div>
+    <div id="subs-list-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+  `;
+  const statusMap = { pending_payment: 'pill-pending', active: 'pill-verified', cancelled: 'pill-draft', expired: 'pill-rejected' };
+
+  const load = async () => {
+    const listArea = document.getElementById('subs-list-area');
+    const params = new URLSearchParams();
+    const st = document.getElementById('subs-status-filter').value;
+    if (st) params.set('status', st);
+
+    try {
+      const data = await apiFetch(`/api/payments/subscriptions/all/?${params.toString()}`);
+      const results = data.results || data;
+      if (!results.length) {
+        listArea.innerHTML = `<div class="empty-state"><h3>No subscriptions found</h3></div>`;
+        return;
+      }
+      listArea.innerHTML = results.map((s) => `
+        <div class="table-row">
+          <span class="text-muted">${escapeHtml(s.subscriber_username)} &rarr; ${escapeHtml(s.seller_username)}</span>
+          <span>${money(s.price, s.currency)}</span>
+          <span>${pillFor(s.status, statusMap)}</span>
+          <span class="text-muted">${s.is_currently_active ? 'access active' : 'access lapsed'}</span>
+          <span class="text-muted">renews/ends ${s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : '—'}</span>
+          <span class="text-muted">${timeAgo(s.created_at)}</span>
+        </div>
+      `).join('');
+    } catch (err) {
+      listArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+    }
+  };
+
+  document.getElementById('subs-status-filter').addEventListener('change', load);
   load();
 }
 
@@ -1295,9 +1433,9 @@ async function renderWithdrawalsQueue(content) {
           </div>
           <div style="min-width:220px;">
             <div id="wd-alert-${w.id}"></div>
-            <input type="text" class="wd-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="wd-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-sm btn-block wd-complete" data-id="${w.id}" style="margin-bottom:6px;">Mark paid</button>
-            <input type="text" class="wd-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="wd-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block wd-reject" data-id="${w.id}">Reject</button>
           </div>
         </div>
@@ -1342,7 +1480,7 @@ async function renderPlatformWallet(content) {
     const data = await apiFetch('/api/wallet/platform/');
     const w = data.wallet;
     content.innerHTML = `
-      <div class="card" style="padding:20px; margin-bottom:18px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom:18px;">
         <p class="text-muted" style="margin:0;">Platform commission balance</p>
         <div style="font-size:2rem; font-weight:700;">${money(w.balance, w.currency)}</div>
         <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">${data.commission_entries_last_30_days} commission entries in the last 30 days</p>
@@ -1383,13 +1521,13 @@ async function renderTreasuryTab(content) {
     const activeAccounts = accounts.filter((a) => a.is_active);
 
     content.innerHTML = `
-      <div class="card" style="padding:20px; margin-bottom:20px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
         <p class="text-muted" style="margin:0;">Platform commission balance</p>
         <div style="font-size:2rem; font-weight:700;">${money(walletData.wallet.balance, walletData.wallet.currency)}</div>
         <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">Company withdrawals below move money out of this balance. Approval requires a super_admin ("company owner") account.</p>
       </div>
 
-      <div class="card" style="padding:20px; margin-bottom:20px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Company payout accounts</h3>
         <div id="treasury-account-alert"></div>
         ${accounts.length ? accounts.map((a) => `
@@ -1415,7 +1553,7 @@ async function renderTreasuryTab(content) {
         </form>
       </div>
 
-      <div class="card" style="padding:20px; margin-bottom:20px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Request a treasury withdrawal</h3>
         <div id="treasury-request-alert"></div>
         ${activeAccounts.length ? `
@@ -1441,7 +1579,7 @@ async function renderTreasuryTab(content) {
       <h4 style="margin-bottom:10px;">Withdrawal requests</h4>
       <div id="treasury-withdrawals-list">
         ${withdrawals.length ? withdrawals.map((w) => `
-          <div class="card" style="padding:14px 18px; margin-bottom:8px;">
+          <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
             <div class="flex-between" style="align-items:flex-start;">
               <div>
                 <strong>${money(w.amount)}</strong> &middot; ${escapeHtml(w.payout_account_display)}
@@ -1451,9 +1589,9 @@ async function renderTreasuryTab(content) {
               ${isSuperAdmin && w.status === 'requested' ? `
                 <div style="min-width:200px;">
                   <div id="treasury-review-alert-${w.id}"></div>
-                  <input type="text" class="treasury-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <input type="text" class="treasury-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
                   <button class="btn btn-sm btn-block treasury-approve" data-id="${w.id}" style="margin-bottom:6px;">Approve &amp; complete</button>
-                  <input type="text" class="treasury-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <input type="text" class="treasury-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
                   <button class="btn btn-outline btn-sm btn-block treasury-reject" data-id="${w.id}">Reject</button>
                 </div>
               ` : (w.status === 'requested' && !isSuperAdmin ? `<p class="text-muted" style="font-size:0.8rem;">Awaiting super_admin approval.</p>` : '')}
@@ -1584,13 +1722,13 @@ async function renderSettingsTab(content) {
     const statusData = await apiFetch('/api/system-status/');
 
     content.innerHTML = `
-      <h3 style="margin-bottom:4px;">Integrations</h3>
+      <h3 style="margin-bottom:var(--space-1);">Integrations</h3>
       <p class="text-muted" style="font-size:0.85rem; margin-top:0;">
         ${isAdmin ? 'Credentials are encrypted at rest and never shown in full once saved -- only a masked hint. Saved changes take effect immediately, no server restart needed.' : 'Viewing only -- editing credentials requires an admin account.'}
       </p>
       <div id="providers-area"></div>
       ${statusData.debug_mode ? `<div class="alert alert-error" style="margin:20px 0;"><strong>DEBUG mode is ON.</strong> This should be OFF in production.</div>` : ''}
-      <h3 style="margin-bottom:12px; margin-top:24px;">Recent activity (audit log)</h3>
+      <h3 style="margin-bottom:var(--space-3); margin-top:var(--space-6);">Recent activity (audit log)</h3>
       <div id="audit-log-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
     `;
 
@@ -1628,7 +1766,7 @@ function renderProviderCard(providerKey, fieldsStatus, isAdmin) {
   const overallLabel = allSet ? 'Configured' : (anySet ? 'Partially configured' : 'Not configured');
 
   return `
-    <div class="card" style="padding:20px; margin-bottom:16px;">
+    <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-4);">
       <div class="flex-between" style="align-items:flex-start; margin-bottom:10px;">
         <div>
           <h4 style="margin:0 0 2px 0;">${escapeHtml(meta.label)}</h4>
@@ -1683,7 +1821,7 @@ function wireProviderCard(providerKey, isAdmin) {
       }
     });
     if (Object.keys(body).length === 0) {
-      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:8px;">Nothing to save -- fill in at least one field, or use "Clear" to remove an existing value.</div>`;
+      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:var(--space-2);">Nothing to save -- fill in at least one field, or use "Clear" to remove an existing value.</div>`;
       return;
     }
 
@@ -1691,13 +1829,13 @@ function wireProviderCard(providerKey, isAdmin) {
     btn.innerHTML = '<span class="spinner"></span>';
     try {
       await apiFetch(`/api/integration-credentials/${providerKey}/`, { method: 'POST', body });
-      alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:8px;">Saved. Takes effect immediately.</div>`;
+      alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding:var(--space-2);">Saved. Takes effect immediately.</div>`;
       setTimeout(() => {
         const tab = document.getElementById('tab-content');
         renderSettingsTab(tab);
       }, 1100);
     } catch (err) {
-      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:8px;">${escapeHtml(formatApiError(err))}</div>`;
+      alertBox.innerHTML = `<div class="alert alert-error" style="font-size:0.8rem; padding:var(--space-2);">${escapeHtml(formatApiError(err))}</div>`;
       btn.disabled = false;
       btn.textContent = `Save ${PROVIDER_META[providerKey].label} settings`;
     }
@@ -1768,7 +1906,7 @@ async function renderUnifiedQueue(content) {
       return;
     }
     const bulkBar = `
-      <div class="card" style="padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div class="card" style="padding:10px 16px; margin-bottom:var(--space-3); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
           <input type="checkbox" id="queue-select-all" style="width:auto;"> Select all
         </label>
@@ -1782,7 +1920,7 @@ async function renderUnifiedQueue(content) {
       <div class="card" style="padding:16px 20px; margin-bottom:10px;">
         <div class="flex-between">
           <div style="display:flex; align-items:flex-start; gap:10px;">
-            <input type="checkbox" class="queue-select" data-id="${item.id}" style="width:auto; margin-top:4px;">
+            <input type="checkbox" class="queue-select" data-id="${item.id}" style="width:auto; margin-top:var(--space-1);">
             <div>
               <div class="flex-between" style="justify-content:flex-start; gap:10px;">
                 <strong>${escapeHtml((item.item_type || '').replace(/_/g, ' '))}</strong>
@@ -1859,7 +1997,7 @@ async function renderUnifiedQueue(content) {
 
 async function renderSupportQueue(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:16px;">
+    <div class="field-row" style="margin-bottom:var(--space-4);">
       <select id="support-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
         <option value="open">Open</option>
         <option value="in_progress">In progress</option>
@@ -1903,8 +2041,8 @@ async function renderSupportQueue(content) {
             </div>
           ` : ''}
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-            <input type="text" class="support-reply-input" data-id="${t.id}" placeholder="Reply&hellip;" style="flex:1; padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
-            <select class="support-reply-status" data-id="${t.id}" style="padding:8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="support-reply-input" data-id="${t.id}" placeholder="Reply&hellip;" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <select class="support-reply-status" data-id="${t.id}" style="padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
               <option value="">Keep status</option>
               <option value="in_progress">Mark in progress</option>
               <option value="resolved">Mark resolved</option>
@@ -1948,7 +2086,7 @@ async function renderSupportQueue(content) {
 
 async function renderFinancialsTab(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:16px; align-items:flex-end;">
+    <div class="field-row" style="margin-bottom:var(--space-4); align-items:flex-end;">
       <div class="form-group" style="margin-bottom:0;">
         <label for="fin-period">Period</label>
         <select id="fin-period">
@@ -1981,7 +2119,7 @@ async function renderFinancialsTab(content) {
       const maxSales = Math.max(1, ...data.results.map((r) => Number(r.gross_sales)));
 
       document.getElementById('fin-summary').innerHTML = `
-        <div class="scoreboard" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:20px;">
+        <div class="scoreboard" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:var(--space-5);">
           <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Gross sales</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.gross_sales)}</div></div>
           <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Platform commission</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.platform_commission)}</div></div>
           <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Orders</p><div style="font-size:1.3rem; font-weight:700;">${data.totals.order_count}</div></div>
@@ -1990,7 +2128,7 @@ async function renderFinancialsTab(content) {
       `;
 
       document.getElementById('fin-table').innerHTML = data.results.length ? `
-        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:20px;">
+        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:var(--space-5);">
           ${data.results.map((r) => `
             <div style="display:flex; align-items:center; gap:10px;">
               <span class="text-muted mono" style="width:110px; font-size:0.78rem;">${escapeHtml(r.period)}</span>

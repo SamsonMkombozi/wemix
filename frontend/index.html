@@ -17,31 +17,35 @@
 <link rel="stylesheet" href="css/style.css">
 <style>
   /* ----------------------------------------------------------------------
-     WEMIX homepage -- scoped entirely to this page. Deliberately a
-     separate palette/component set from the shared gold/black design
-     tokens in css/style.css (used by every other page), so none of this
-     affects login/dashboard/moderator/listing. Only .spinner, .hidden,
-     .text-muted and similar plain utilities are reused from there.
+     WEMIX homepage -- scoped component set (its layout/classes are
+     specific to this page), but the palette now resolves to the SAME
+     black/white/gold tokens as css/style.css (used by every other page)
+     instead of a separate hue set -- one brand across the whole system.
+     Container width/padding also match .container from the shared sheet
+     (var(--max-width), 24px) so the homepage's edges line up with every
+     other page instead of running its own slightly-wider measure.
+     Only .spinner, .hidden, .text-muted and similar plain utilities are
+     reused directly from there.
      ---------------------------------------------------------------------- */
   :root {
-    --wm-navy: #0d1b3d;
-    --wm-navy-2: #16265a;
-    --wm-red: #e63946;
-    --wm-blue: #2f6fed;
-    --wm-text: #14141f;
-    --wm-muted: #6b7280;
-    --wm-bg-alt: #f6f7fb;
-    --wm-border: #e7e9f0;
+    --wm-navy: var(--color-black);
+    --wm-navy-2: #262626;
+    --wm-red: var(--color-gold-secondary);
+    --wm-blue: var(--color-gold);
+    --wm-text: var(--color-text);
+    --wm-muted: var(--color-text-muted);
+    --wm-bg-alt: #f6f3ea;
+    --wm-border: var(--color-border);
   }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: 'Poppins', sans-serif; color: var(--wm-text); background: #fff; }
   a { text-decoration: none; color: inherit; }
-  .wm-wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+  .wm-wrap { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
   .wm-hidden { display: none !important; }
 
   /* Utility bar */
-  .wm-utility-bar { background: var(--wm-navy); color: #cdd6f0; font-size: 0.78rem; }
-  .wm-utility-bar .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; flex-wrap: wrap; gap: 6px; }
+  .wm-utility-bar { background: var(--wm-navy); color: rgba(255,255,255,0.75); font-size: 0.78rem; }
+  .wm-utility-bar .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 8px 24px; flex-wrap: wrap; gap: 6px; }
   .wm-utility-left { display: flex; align-items: center; gap: 16px; }
   .wm-utility-right { display: flex; align-items: center; gap: 16px; }
   .wm-utility-right a { opacity: 0.85; }
@@ -52,7 +56,7 @@
 
   /* Main header */
   .wm-main-header { background: #fff; border-bottom: 1px solid var(--wm-border); }
-  .wm-main-header .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; gap: 24px; flex-wrap: wrap; }
+  .wm-main-header .wm-wrap { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; gap: 24px; flex-wrap: wrap; }
   .wm-logo { display: flex; flex-direction: column; }
   .wm-logo img { height: 38px; display: block; }
   .wm-logo-fallback { font-family: 'Poppins', sans-serif; font-weight: 800; font-size: 1.7rem; letter-spacing: -0.02em; color: var(--wm-navy); }
@@ -71,15 +75,15 @@
   .wm-signin-btn { background: var(--wm-navy); color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: inherit; }
   .wm-signin-btn:hover { background: var(--wm-navy-2); }
   .wm-user-chip { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; }
-  .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
+  .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
 
   /* Main nav */
   .wm-main-nav { background: var(--wm-navy); }
   .wm-main-nav .wm-wrap { display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .wm-main-nav .wm-wrap::-webkit-scrollbar { display: none; }
-  .wm-nav-hamburger { display: flex; align-items: center; padding: 13px 14px 13px 0; color: #dfe5f7; cursor: pointer; flex-shrink: 0; }
+  .wm-nav-hamburger { display: flex; align-items: center; padding: 13px 14px 13px 0; color: rgba(255,255,255,0.8); cursor: pointer; flex-shrink: 0; }
   .wm-nav-hamburger svg { width: 18px; height: 18px; }
-  .wm-nav-link { color: #dfe5f7; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.03em; padding: 13px 14px; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
+  .wm-nav-link { color: rgba(255,255,255,0.8); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.03em; padding: 13px 14px; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
   .wm-nav-link:hover, .wm-nav-link.active { color: #fff; border-bottom-color: var(--wm-red); }
   .wm-nav-more { position: relative; margin-left: auto; flex-shrink: 0; }
   .wm-nav-more-dropdown { display: none; position: absolute; top: 100%; right: 0; background: #fff; border: 1px solid var(--wm-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 180px; z-index: 20; padding: 6px 0; }
@@ -89,7 +93,7 @@
 
   /* Breaking ticker */
   .wm-breaking-bar { background: #fff; border-bottom: 1px solid var(--wm-border); display: flex; align-items: stretch; }
-  .wm-breaking-tag { background: var(--wm-red); color: #fff; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.05em; padding: 9px 16px; display: flex; align-items: center; white-space: nowrap; }
+  .wm-breaking-tag { background: var(--wm-red); color: var(--color-black); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.05em; padding: 9px 16px; display: flex; align-items: center; white-space: nowrap; }
   .wm-breaking-track-wrap { flex: 1; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; }
   .wm-breaking-track { font-size: 0.8rem; color: var(--wm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wm-breaking-track span:not(:last-child)::after { content: '•'; margin: 0 14px; color: var(--wm-red); }
@@ -106,19 +110,19 @@
 
   /* Hero */
   .wm-hero-grid { display: grid; grid-template-columns: 1.7fr 1fr; gap: 24px; align-items: start; }
-  .wm-hero-card { position: relative; border-radius: 10px; overflow: hidden; min-height: 420px; background: linear-gradient(135deg, var(--wm-navy), #1c2f66); display: flex; align-items: flex-end; }
+  .wm-hero-card { position: relative; border-radius: 10px; overflow: hidden; min-height: 420px; background: linear-gradient(135deg, var(--wm-navy), #1a1a1a); display: flex; align-items: flex-end; }
   .wm-hero-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  .wm-hero-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,8,20,0.88), rgba(5,8,20,0.15) 60%); }
+  .wm-hero-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.88), rgba(0,0,0,0.15) 60%); }
   .wm-hero-content { position: relative; z-index: 1; padding: 28px; color: #fff; }
-  .wm-hero-tag { display: inline-block; background: var(--wm-blue); color: #fff; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; padding: 5px 12px; border-radius: 4px; margin-bottom: 12px; }
+  .wm-hero-tag { display: inline-block; background: var(--wm-blue); color: var(--color-black); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; padding: 5px 12px; border-radius: 4px; margin-bottom: 12px; }
   .wm-hero-content h1 { font-size: 1.9rem; font-weight: 700; margin: 0 0 10px 0; line-height: 1.25; max-width: 640px; }
-  .wm-hero-content p { font-size: 0.9rem; color: #d5dbef; max-width: 560px; margin: 0 0 14px 0; }
-  .wm-hero-meta { font-size: 0.78rem; color: #b7c0e0; }
+  .wm-hero-content p { font-size: 0.9rem; color: rgba(255,255,255,0.75); max-width: 560px; margin: 0 0 14px 0; }
+  .wm-hero-meta { font-size: 0.78rem; color: rgba(255,255,255,0.65); }
   .wm-hero-dots { display: flex; gap: 6px; margin-top: 14px; }
   .wm-hero-dot { width: 20px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.4); cursor: pointer; }
   .wm-hero-dot.active { background: #fff; }
-  .wm-hero-next-btn { position: absolute; z-index: 2; top: 50%; right: 16px; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%; border: none; background: rgba(13,27,61,0.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-  .wm-hero-next-btn:hover { background: rgba(13,27,61,0.8); }
+  .wm-hero-next-btn { position: absolute; z-index: 2; top: 50%; right: 16px; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .wm-hero-next-btn:hover { background: rgba(0,0,0,0.8); }
   .wm-hero-next-btn svg { width: 16px; height: 16px; }
 
   .wm-latest-list { display: flex; flex-direction: column; gap: 14px; }
@@ -148,8 +152,8 @@
   .wm-live-box { background: var(--wm-navy); border-radius: 10px; padding: 24px 20px; color: #fff; display: flex; flex-direction: column; justify-content: space-between; min-height: 240px; }
   .wm-live-logo { font-weight: 800; font-size: 1.3rem; }
   .wm-live-logo span { color: var(--wm-red); }
-  .wm-live-desc { font-size: 0.82rem; color: #c7cfe8; margin: 10px 0 16px 0; }
-  .wm-watch-btn { background: var(--wm-red); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; width: fit-content; }
+  .wm-live-desc { font-size: 0.82rem; color: rgba(255,255,255,0.7); margin: 10px 0 16px 0; }
+  .wm-watch-btn { background: var(--wm-red); color: var(--color-black); border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; width: fit-content; }
 
   /* Trending + around */
   .wm-trend-around-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 28px; }
@@ -172,24 +176,24 @@
   .wm-newsletter-left { display: flex; align-items: center; gap: 14px; }
   .wm-newsletter-icon { width: 40px; height: 40px; border-radius: 50%; background: var(--wm-blue); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .wm-newsletter-title { font-weight: 700; font-size: 0.95rem; }
-  .wm-newsletter-sub { font-size: 0.78rem; color: #c7cfe8; }
+  .wm-newsletter-sub { font-size: 0.78rem; color: rgba(255,255,255,0.7); }
   .wm-newsletter-form { display: flex; gap: 8px; }
   .wm-newsletter-form input { padding: 10px 14px; border-radius: 6px; border: none; font-size: 0.85rem; min-width: 220px; font-family: inherit; }
-  .wm-newsletter-form button { background: var(--wm-blue); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
-  .wm-newsletter-note { font-size: 0.72rem; color: #9aa5c9; width: 100%; margin-top: 4px; }
+  .wm-newsletter-form button { background: var(--wm-blue); color: var(--color-black); border: none; padding: 10px 18px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
+  .wm-newsletter-note { font-size: 0.72rem; color: rgba(255,255,255,0.55); width: 100%; margin-top: 4px; }
 
   /* Footer */
-  .wm-footer { background: var(--wm-navy); color: #b7c0e0; padding: 40px 0 20px; margin-top: 20px; }
+  .wm-footer { background: var(--wm-navy); color: rgba(255,255,255,0.65); padding: 40px 0 20px; margin-top: 20px; }
   .wm-footer-grid { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr); gap: 24px; margin-bottom: 28px; }
   .wm-footer-col h4 { color: #fff; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 12px 0; }
-  .wm-footer-col a { display: block; font-size: 0.82rem; margin-bottom: 8px; color: #b7c0e0; }
+  .wm-footer-col a { display: block; font-size: 0.82rem; margin-bottom: 8px; color: rgba(255,255,255,0.65); }
   .wm-footer-col a:hover { color: #fff; }
   .wm-footer-social { display: flex; gap: 10px; margin-top: 14px; }
   .wm-footer-social a { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; }
   .wm-footer-social svg { width: 13px; height: 13px; }
-  .wm-footer-contact-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; margin-bottom: 10px; color: #b7c0e0; }
+  .wm-footer-contact-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; margin-bottom: 10px; color: rgba(255,255,255,0.65); }
   .wm-footer-contact-item svg { width: 14px; height: 14px; flex-shrink: 0; }
-  .wm-footer-bottom { border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px; font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: #8b96bd; }
+  .wm-footer-bottom { border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px; font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: rgba(255,255,255,0.5); }
 
   /* Search-results mode (real search/category filtering, swaps out the editorial layout) */
   .wm-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
@@ -322,7 +326,7 @@
     <div class="wm-newsletter-bar">
       <div class="wm-newsletter-left">
         <div class="wm-newsletter-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0d0d0d" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
         </div>
         <div>
           <div class="wm-newsletter-title">Stay Informed. Stay Ahead.</div>
@@ -352,7 +356,7 @@
     <div class="wm-footer-grid">
       <div class="wm-footer-col">
         <div class="wm-logo-fallback" style="color:#fff; font-size:1.4rem;">WEMIX<span>.</span></div>
-        <p style="font-size:0.8rem; color:#9aa5c9; margin:8px 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
+        <p style="font-size:0.8rem; color:rgba(255,255,255,0.55); margin:8px 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
         <div class="wm-footer-social" id="wm-footer-social"></div>
       </div>
       <div class="wm-footer-col">

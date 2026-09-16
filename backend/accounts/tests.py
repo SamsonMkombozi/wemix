@@ -1,4 +1,8 @@
+from unittest.mock import Mock, patch
+
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -205,3 +209,70 @@ class LoginGatingTests(APITestCase):
         resp = self.client.post("/api/accounts/login/", {"email": "u1@example.com", "password": "pw12345678!"})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertIn("access", resp.data)
+
+
+class FaceMatchTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="fmuser", email="fmuser@example.com", password="pw12345678!")
+        self.verification = IdentityVerification.objects.create(
+            user=self.user, id_type=IdentityVerification.IdType.NIDA,
+            front_image=SimpleUploadedFile("front.jpg", b"fake-front-bytes"),
+            selfie_image=SimpleUploadedFile("selfie.jpg", b"fake-selfie-bytes"),
+        )
+
+    def test_no_op_when_not_configured(self):
+        from .face_match import run_face_match
+
+        with patch("accounts.face_match.requests.post") as mock_post:
+            run_face_match(self.verification)
+        mock_post.assert_not_called()
+        self.verification.refresh_from_db()
+        self.assertIsNone(self.verification.face_match_score)
+        self.assertIsNone(self.verification.liveness_passed)
+
+    @override_settings(KYC_FACE_MATCH_API_URL="https://kyc.example/match", KYC_FACE_MATCH_API_KEY="fake-key")
+    def test_saves_score_and_liveness_from_a_configured_vendor(self):
+        from .face_match import run_face_match
+
+        mock_resp = Mock()
+        mock_resp.json.return_value = {"face_match_score": 92.5, "liveness_passed": True}
+        with patch("accounts.face_match.requests.post", return_value=mock_resp) as mock_post:
+            run_face_match(self.verification)
+        mock_post.assert_called_once()
+        self.verification.refresh_from_db()
+        self.assertEqual(self.verification.face_match_score, 92.5)
+        self.assertTrue(self.verification.liveness_passed)
+
+    @override_settings(KYC_FACE_MATCH_API_URL="https://kyc.example/match", KYC_FACE_MATCH_API_KEY="fake-key")
+    def test_never_raises_and_leaves_fields_unset_on_vendor_failure(self):
+        from .face_match import run_face_match
+
+        with patch("accounts.face_match.requests.post", side_effect=ConnectionError("boom")):
+            run_face_match(self.verification)  # must not raise
+        self.verification.refresh_from_db()
+        self.assertIsNone(self.verification.face_match_score)
+        self.assertIsNone(self.verification.liveness_passed)
+
+    @override_settings(KYC_FACE_MATCH_API_URL="https://kyc.example/match", KYC_FACE_MATCH_API_KEY="fake-key")
+    def test_kyc_submission_runs_face_match_without_blocking(self):
+        import io
+
+        from PIL import Image
+
+        def real_jpeg_bytes():
+            buf = io.BytesIO()
+            Image.new("RGB", (20, 20), color="blue").save(buf, format="JPEG")
+            return buf.getvalue()
+
+        self.client.force_authenticate(self.user)
+        mock_resp = Mock()
+        mock_resp.json.return_value = {"face_match_score": 80.0, "liveness_passed": True}
+        with patch("accounts.face_match.requests.post", return_value=mock_resp):
+            resp = self.client.post("/api/accounts/kyc/", {
+                "id_type": "nida",
+                "front_image": SimpleUploadedFile("front2.jpg", real_jpeg_bytes(), content_type="image/jpeg"),
+                "selfie_image": SimpleUploadedFile("selfie2.jpg", real_jpeg_bytes(), content_type="image/jpeg"),
+            }, format="multipart")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        created = IdentityVerification.objects.get(pk=resp.data["id"])
+        self.assertEqual(created.face_match_score, 80.0)
