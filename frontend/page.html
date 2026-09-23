@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page — Habari Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .static-doc { max-width: 720px; margin: 0 auto; }
+  .static-doc p { font-size: 0.92rem; line-height: 1.7; color: var(--color-text); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<div id="topnav-root"></div>
+
+<main class="container section">
+  <div class="card static-doc card-spacious" style="var(--space-9);" id="content">
+    <p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
+  </div>
+</main>
+
+<footer>
+  <div class="container flex-between">
+    <span>&copy; 2026 WEMIX &middot; Dar es Salaam, Tanzania</span>
+    <a href="index.html">&larr; Back to marketplace</a>
+  </div>
+</footer>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+const slug = new URLSearchParams(window.location.search).get('slug');
+const content = document.getElementById('content');
+
+async function loadPage() {
+  if (!slug) {
+    content.innerHTML = `<div class="alert alert-error">No page specified.</div>`;
+    return;
+  }
+  try {
+    const page = await apiFetch(`/api/static-pages/${encodeURIComponent(slug)}/`, { auth: false });
+    document.title = `${page.title} — WEMIX`;
+    if (page.meta_description) {
+      let tag = document.querySelector('meta[name="description"]');
+      if (!tag) { tag = document.createElement('meta'); tag.setAttribute('name', 'description'); document.head.appendChild(tag); }
+      tag.setAttribute('content', page.meta_description);
+    }
+    content.innerHTML = `<h2>${escapeHtml(page.title)}</h2><p>${escapeHtml(page.body)}</p>`;
+  } catch (err) {
+    content.innerHTML = `<div class="empty-state"><h3>Page not found</h3><p>${escapeHtml(formatApiError(err))}</p></div>`;
+  }
+}
+
+loadPage();
+</script>
+</body>
+</html>

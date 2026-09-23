@@ -8,67 +8,127 @@
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <style>
-  .terms-doc { max-width: 760px; margin: 0 auto; }
+  .terms-progress-track { position: sticky; top: 0; height: 3px; background: var(--color-border); z-index: 40; }
+  .terms-progress-fill { height: 100%; width: 0%; background: var(--color-gold); transition: width 0.1s linear; }
+
+  .terms-layout { display: grid; grid-template-columns: 220px 1fr; gap: var(--space-7); align-items: start; max-width: 980px; margin: 0 auto; }
+  .terms-toc { position: sticky; top: 24px; }
+  .terms-toc-title { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); margin-bottom: var(--space-3); }
+  .terms-toc a { display: block; font-size: 0.82rem; color: var(--color-text-muted); padding: var(--space-1) 0 var(--space-1) var(--space-3); border-left: 2px solid var(--color-border); line-height: 1.35; }
+  .terms-toc a:hover { color: var(--color-text); }
+  .terms-toc a.active { color: var(--color-gold-dark); border-left-color: var(--color-gold); font-weight: 600; }
+
+  .terms-toc-mobile { display: none; }
+
+  .terms-doc { max-width: none; }
   .terms-doc h2 { margin-top: 0; }
-  .terms-doc h3 { margin-top: 32px; margin-bottom: 8px; font-size: 1.05rem; }
+  .terms-doc h3 { margin-top: var(--space-8); margin-bottom: var(--space-2); font-size: 1.05rem; scroll-margin-top: var(--space-5); }
   .terms-doc p, .terms-doc li { font-size: 0.92rem; line-height: 1.65; color: var(--color-text); }
-  .terms-doc ol.sections { padding-left: 20px; }
-  .terms-doc ol.sections > li { margin-bottom: 4px; }
-  .terms-meta { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 24px; }
+  .terms-meta { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: var(--space-6); }
+
+  .terms-nav-footer { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-9); padding-top: var(--space-5); border-top: 1px solid var(--color-border); font-size: 0.85rem; }
+
+  .terms-prevnext {
+    position: sticky; bottom: 0; margin-top: var(--space-6);
+    background: #fff; border-top: 1px solid var(--color-border);
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+    padding: var(--space-3) var(--space-1); max-width: 980px; margin-left: auto; margin-right: auto;
+  }
+  .terms-prevnext button { background: none; border: none; cursor: pointer; font-family: inherit; font-size: 0.8rem; font-weight: 600; color: var(--color-gold-dark); padding: var(--space-2) var(--space-1); }
+  .terms-prevnext button:disabled { color: var(--color-border); cursor: default; }
+  .terms-prevnext-label { font-size: 0.75rem; color: var(--color-text-muted); text-align: center; flex: 1; }
+
+  @media (max-width: 860px) {
+    .terms-layout { grid-template-columns: 1fr; }
+    .terms-toc { display: none; }
+    .terms-toc-mobile {
+      display: flex; gap: var(--space-1); overflow-x: auto; -webkit-overflow-scrolling: touch;
+      padding: var(--space-3) 0 var(--space-4) 0; margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border);
+      max-width: 980px; margin-left: auto; margin-right: auto;
+    }
+    .terms-toc-mobile a {
+      flex-shrink: 0; font-size: 0.76rem; font-weight: 600; color: var(--color-text-muted);
+      background: #f4f0e4; padding: var(--space-2) var(--space-3); border-radius: 999px; white-space: nowrap;
+    }
+    .terms-toc-mobile a.active { background: var(--color-gold); color: var(--color-black); }
+  }
 </style>
 </head>
 <body>
 
 <div id="topnav-root"></div>
+<div class="terms-progress-track"><div class="terms-progress-fill" id="terms-progress-fill"></div></div>
 
-<main class="container section">
-  <div class="card terms-doc" style="padding: 32px 36px;">
-    <h2>Terms &amp; Conditions</h2>
-    <p class="terms-meta">Version <strong id="terms-version">&hellip;</strong> &middot; This document governs your use of Habari Platform ("WEMIX"). It is a working draft appropriate for an early-stage platform and has not yet been reviewed by outside counsel -- treat it as the operative terms today, not as finished legal copy.</p>
+<main class="container section" id="top">
+  <div class="terms-toc-mobile" id="terms-toc-mobile"></div>
+  <div class="terms-layout">
+    <nav class="terms-toc" id="terms-toc" aria-label="Table of contents"></nav>
+    <div class="card terms-doc card-spacious" style="var(--space-9);">
+      <h2>Terms &amp; Conditions</h2>
+      <p class="terms-meta">Version <strong id="terms-version">&hellip;</strong> &middot; This document governs your use of Habari Platform ("WEMIX"). It is a working draft appropriate for an early-stage platform and has not yet been reviewed by outside counsel -- treat it as the operative terms today, not as finished legal copy.</p>
 
-    <h3>1. Acceptance of terms</h3>
-    <p>By creating an account, you agree to be bound by this version of the Terms &amp; Conditions. If we materially change these terms, you will be asked to re-accept the new version the next time you sign in.</p>
+      <h3 id="s1">1. Acceptance of terms</h3>
+      <p>By creating an account, you agree to be bound by this version of the Terms &amp; Conditions. If we materially change these terms, you will be asked to re-accept the new version the next time you sign in.</p>
 
-    <h3>2. What Habari Platform is</h3>
-    <p>Habari Platform is a marketplace where verified journalists, media houses, and individual sellers publish news content for sale, and buyers purchase access to that content. We are a marketplace and verification layer -- we are not the publisher of seller-submitted content, and are not responsible for its factual accuracy beyond the verification checks described in Section 5.</p>
+      <h3 id="s2">2. What Habari Platform is</h3>
+      <p>Habari Platform is a marketplace where verified journalists, media houses, and individual sellers publish news content for sale, and buyers purchase access to that content. We are a marketplace and verification layer -- we are not the publisher of seller-submitted content, and are not responsible for its factual accuracy beyond the verification checks described in Section 5.</p>
 
-    <h3>3. Accounts and eligibility</h3>
-    <p>You must provide accurate registration information and keep your credentials confidential. Accounts are personal (individual) or organizational (media house / corporate buyer) as selected at signup; misrepresenting your account type may result in suspension.</p>
+      <h3 id="s3">3. Accounts and eligibility</h3>
+      <p>You must provide accurate registration information and keep your credentials confidential. Accounts are personal (individual) or organizational (media house / corporate buyer) as selected at signup; misrepresenting your account type may result in suspension.</p>
 
-    <h3>4. Roles</h3>
-    <p>Buyers purchase access to published listings. Sellers, journalists, and media houses publish listings for sale. Journalist accounts may self-declare as Citizen or Professional Journalist at signup; the Professional tier requires a press credential reviewed by a moderator before the corresponding badge is granted.</p>
+      <h3 id="s4">4. Roles</h3>
+      <p>Buyers purchase access to published listings. Sellers, journalists, and media houses publish listings for sale. Journalist accounts may self-declare as Citizen or Professional Journalist at signup; the Professional tier requires a press credential reviewed by a moderator before the corresponding badge is granted.</p>
 
-    <h3>5. Identity verification (KYC) and content review</h3>
-    <p>Selling on the platform requires identity verification. Submitted listings pass through an AI verification pipeline and, where flagged, human moderator review before publishing. Verification reduces but does not eliminate the risk of inaccurate or misleading content; buyers should exercise their own judgment.</p>
+      <h3 id="s5">5. Identity verification (KYC) and content review</h3>
+      <p>Selling on the platform requires identity verification. Submitted listings pass through an AI verification pipeline and, where flagged, human moderator review before publishing. Verification reduces but does not eliminate the risk of inaccurate or misleading content; buyers should exercise their own judgment.</p>
 
-    <h3>6. Payments, commission, and wallets</h3>
-    <p>Buyers pay the listed price at checkout through a supported payment provider. A platform commission (disclosed in your seller dashboard) is deducted from each sale; the remainder is credited to the seller's wallet. Sellers may request a withdrawal to a verified payout account, subject to identity-matching checks and the withdrawal limits in effect at the time of the request.</p>
+      <h3 id="s6">6. Payments, commission, and wallets</h3>
+      <p>Buyers pay the listed price at checkout through a supported payment provider. A platform commission (disclosed in your seller dashboard) is deducted from each sale; the remainder is credited to the seller's wallet. Sellers may request a withdrawal to a verified payout account, subject to identity-matching checks and the withdrawal limits in effect at the time of the request.</p>
 
-    <h3>7. Refunds</h3>
-    <p>A buyer may request a refund for a paid order, stating a reason. Refund requests are reviewed by a moderator; approved refunds reverse the seller's earning and the platform's commission on that sale. Refunds are handled case by case and are not automatic.</p>
+      <h3 id="s7">7. Refunds</h3>
+      <p>A buyer may request a refund for a paid order, stating a reason. Refund requests are reviewed by a moderator; approved refunds reverse the seller's earning and the platform's commission on that sale. Refunds are handled case by case and are not automatic.</p>
 
-    <h3>8. Content usage rights</h3>
-    <p>Purchasing a listing unlocks the full article body and, where attached, the original media files for download. Purchasing access does not transfer copyright: redistribution, resale, or republishing of purchased content beyond your own permitted use requires the seller's separate authorization.</p>
+      <h3 id="s8">8. Content usage rights</h3>
+      <p>Purchasing a listing unlocks the full article body and, where attached, the original media files for download. Purchasing access does not transfer copyright: redistribution, resale, or republishing of purchased content beyond your own permitted use requires the seller's separate authorization.</p>
 
-    <h3>9. Prohibited conduct</h3>
-    <p>You may not: circumvent the platform to arrange off-platform payment for content listed here; submit fabricated, plagiarized, or knowingly false content; harass other users; or attempt to bypass verification or moderation systems. Violations may result in a warning, suspension, or permanent ban, and repeat or severe violations are reviewed under our graduated enforcement policy.</p>
+      <h3 id="s9">9. Prohibited conduct</h3>
+      <p>You may not: circumvent the platform to arrange off-platform payment for content listed here; submit fabricated, plagiarized, or knowingly false content; harass other users; or attempt to bypass verification or moderation systems. Violations may result in a warning, suspension, or permanent ban, and repeat or severe violations are reviewed under our graduated enforcement policy.</p>
 
-    <h3>10. Moderation and enforcement</h3>
-    <p>We reserve the right to reject, suspend, or permanently remove listings and accounts that violate these terms, at a moderator's or administrator's discretion, with reasons recorded in an internal audit log. Permanent deletion of a listing that any buyer has already paid for is not performed -- suspension is used instead, so buyers keep access to what they purchased.</p>
+      <h3 id="s10">10. Moderation and enforcement</h3>
+      <p>We reserve the right to reject, suspend, or permanently remove listings and accounts that violate these terms, at a moderator's or administrator's discretion, with reasons recorded in an internal audit log. Permanent deletion of a listing that any buyer has already paid for is not performed -- suspension is used instead, so buyers keep access to what they purchased.</p>
 
-    <h3>11. Support and disputes</h3>
-    <p>Complaints, refund questions, and general support requests can be filed from your dashboard's Support tab and are tracked to resolution. Reports about another user's conduct should use the report function on the relevant listing or profile instead.</p>
+      <h3 id="s11">11. Support and disputes</h3>
+      <p>Complaints, refund questions, and general support requests can be filed from your dashboard's Support tab and are tracked to resolution. Reports about another user's conduct should use the report function on the relevant listing or profile instead.</p>
 
-    <h3>12. Limitation of liability</h3>
-    <p>The platform is provided "as is." To the fullest extent permitted by law, Habari Platform is not liable for indirect, incidental, or consequential damages arising from use of the marketplace, including reliance on the accuracy of seller-submitted content.</p>
+      <h3 id="s12">12. Limitation of liability</h3>
+      <p>The platform is provided "as is." To the fullest extent permitted by law, Habari Platform is not liable for indirect, incidental, or consequential damages arising from use of the marketplace, including reliance on the accuracy of seller-submitted content.</p>
 
-    <h3>13. Changes to these terms</h3>
-    <p>We may update these terms as the platform evolves. Material changes bump the version shown at the top of this page and require re-acceptance on your next login.</p>
+      <h3 id="s13">13. Changes to these terms</h3>
+      <p>We may update these terms as the platform evolves. Material changes bump the version shown at the top of this page and require re-acceptance on your next login.</p>
 
-    <h3>14. Contact</h3>
-    <p>Questions about these terms can be sent via the Support tab in your dashboard once signed in.</p>
+      <h3 id="s14">14. Contact</h3>
+      <p>Questions about these terms can be sent via the Support tab in your dashboard once signed in.</p>
+
+      <div class="terms-nav-footer">
+        <a href="index.html">&larr; Back to marketplace</a>
+        <a href="#top">Back to top &uarr;</a>
+      </div>
+    </div>
   </div>
 </main>
+
+<div class="terms-prevnext" id="terms-prevnext">
+  <button id="terms-prev-btn">&larr; Previous</button>
+  <span class="terms-prevnext-label" id="terms-current-label"></span>
+  <button id="terms-next-btn">Next &rarr;</button>
+</div>
+
+<footer>
+  <div class="container flex-between">
+    <span>&copy; 2026 WEMIX &middot; Dar es Salaam, Tanzania</span>
+    <a href="index.html">&larr; Back to marketplace</a>
+  </div>
+</footer>
 
 <script src="js/api.js"></script>
 <script src="js/nav.js"></script>
@@ -77,6 +137,61 @@ apiFetch('/api/terms/status/', { auth: false }).then((data) => {
   document.getElementById('terms-version').textContent = data.current_version;
 }).catch(() => {
   document.getElementById('terms-version').textContent = 'current';
+});
+
+const SECTIONS = Array.from(document.querySelectorAll('.terms-doc h3')).map((h) => ({ id: h.id, label: h.textContent }));
+
+function buildToc() {
+  const toc = document.getElementById('terms-toc');
+  toc.innerHTML = `<div class="terms-toc-title">Contents</div>` +
+    SECTIONS.map((s) => `<a href="#${s.id}" data-id="${s.id}">${escapeHtml(s.label)}</a>`).join('');
+
+  const tocMobile = document.getElementById('terms-toc-mobile');
+  tocMobile.innerHTML = SECTIONS.map((s) => `<a href="#${s.id}" data-id="${s.id}">${escapeHtml(s.label.replace(/^\d+\.\s*/, ''))}</a>`).join('');
+}
+buildToc();
+
+let currentIndex = 0;
+
+function setActiveSection(index) {
+  currentIndex = index;
+  document.querySelectorAll('.terms-toc a, .terms-toc-mobile a').forEach((a) => {
+    a.classList.toggle('active', a.dataset.id === SECTIONS[index]?.id);
+  });
+  document.getElementById('terms-current-label').textContent = SECTIONS[index] ? SECTIONS[index].label : '';
+  document.getElementById('terms-prev-btn').disabled = index <= 0;
+  document.getElementById('terms-next-btn').disabled = index >= SECTIONS.length - 1;
+
+  const activeMobileLink = document.querySelector(`.terms-toc-mobile a[data-id="${SECTIONS[index]?.id}"]`);
+  if (activeMobileLink) activeMobileLink.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+}
+
+// Scrollspy: whichever section heading is closest to (but above) the
+// top of the viewport is "current" -- standard reading-position logic,
+// cheap enough to just run on scroll for a document this size (14
+// headings) without needing IntersectionObserver's extra bookkeeping.
+function updateOnScroll() {
+  const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = docHeight > 0 ? Math.min(100, (scrollTop / docHeight) * 100) : 0;
+  document.getElementById('terms-progress-fill').style.width = `${progress}%`;
+
+  let idx = 0;
+  SECTIONS.forEach((s, i) => {
+    const el = document.getElementById(s.id);
+    if (el && el.getBoundingClientRect().top <= 120) idx = i;
+  });
+  if (idx !== currentIndex) setActiveSection(idx);
+}
+window.addEventListener('scroll', updateOnScroll, { passive: true });
+setActiveSection(0);
+updateOnScroll();
+
+document.getElementById('terms-prev-btn').addEventListener('click', () => {
+  if (currentIndex > 0) document.getElementById(SECTIONS[currentIndex - 1].id).scrollIntoView({ behavior: 'smooth' });
+});
+document.getElementById('terms-next-btn').addEventListener('click', () => {
+  if (currentIndex < SECTIONS.length - 1) document.getElementById(SECTIONS[currentIndex + 1].id).scrollIntoView({ behavior: 'smooth' });
 });
 </script>
 </body>

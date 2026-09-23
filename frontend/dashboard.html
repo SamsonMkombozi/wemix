@@ -29,6 +29,30 @@ if (['moderator', 'admin', 'super_admin'].includes(_dashUser?.role)) {
 
 const gate = document.getElementById('gate');
 
+// Grouped nav replacing a flat row of 11 equally-weighted tabs -- see
+// css/style.css's "Dashboard primary navigation" block for the styling
+// rationale (native <details> gives free collapse/expand at the tablet
+// tier once .dash-grid stacks to one column; mobile gets its own
+// bottom-nav + drawer below instead of the grouped list).
+const DASH_NAV_GROUPS = {
+  selling: { label: 'Selling', tabs: [['listings', 'My Listings'], ['create', 'Sell News'], ['verification', 'Verification']] },
+  buying: { label: 'Buying', tabs: [['purchases', 'My Purchases'], ['bookmarks', 'Bookmarks'], ['following', 'Following']] },
+  account: { label: 'Account', tabs: [['withdrawals', 'Withdrawals'], ['support', 'Support'], ['subscriptions', 'Subscriptions'], ['alerts', 'Alerts'], ['developer', 'Developer']] },
+};
+const DASH_GROUP_ICONS = {
+  selling: '<path d="M20.59 13.41L11 3.83A2 2 0 009.59 3.24L4 3a1 1 0 00-1 1l.24 5.59a2 2 0 00.58 1.41l9.58 9.58a2 2 0 002.83 0l4.36-4.36a2 2 0 000-2.83z"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>',
+  buying: '<path d="M6 2l1.5 5M18 2l-1.5 5M3 7h18l-1.5 12a2 2 0 01-2 1.7H6.5a2 2 0 01-2-1.7L3 7z"/>',
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/>',
+};
+
+function groupForTab(tab) {
+  return Object.keys(DASH_NAV_GROUPS).find((g) => DASH_NAV_GROUPS[g].tabs.some(([t]) => t === tab));
+}
+
+function navLinkHtml(t, label) {
+  return `<a class="dash-nav-link" data-tab="${t}">${escapeHtml(label)}</a>`;
+}
+
 gate.innerHTML = `
   <div id="terms-banner"></div>
   <div class="dash-grid">
@@ -39,32 +63,81 @@ gate.innerHTML = `
       <div class="card" id="wallet-card">
         <span class="spinner"></span>
       </div>
+      <nav class="dash-nav" id="dash-nav">
+        ${Object.entries(DASH_NAV_GROUPS).map(([key, g]) => `
+          <details class="dash-nav-group" open data-group="${key}">
+            <summary>${escapeHtml(g.label)}</summary>
+            ${g.tabs.map(([t, label]) => navLinkHtml(t, label)).join('')}
+          </details>
+        `).join('')}
+      </nav>
     </aside>
     <section>
-      <div class="dash-tabs">
-        <div class="dash-tab active" data-tab="listings">My Listings</div>
-        <div class="dash-tab" data-tab="create">Sell News</div>
-        <div class="dash-tab" data-tab="verification">Verification</div>
-        <div class="dash-tab" data-tab="purchases">My Purchases</div>
-        <div class="dash-tab" data-tab="bookmarks">Bookmarks</div>
-        <div class="dash-tab" data-tab="following">Following</div>
-        <div class="dash-tab" data-tab="withdrawals">Withdrawals</div>
-        <div class="dash-tab" data-tab="support">Support</div>
-        <div class="dash-tab" data-tab="subscriptions">Subscriptions</div>
-        <div class="dash-tab" data-tab="alerts">Alerts</div>
-        <div class="dash-tab" data-tab="developer">Developer</div>
-      </div>
       <div id="tab-content"></div>
     </section>
   </div>
+
+  <div class="dash-bottom-nav" id="dash-bottom-nav">
+    ${Object.entries(DASH_NAV_GROUPS).map(([key, g]) => `
+      <button class="dash-bottom-nav-item" data-group="${key}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${DASH_GROUP_ICONS[key]}</svg>
+        <span>${escapeHtml(g.label)}</span>
+      </button>
+    `).join('')}
+  </div>
+  <div class="dash-drawer-overlay" id="dash-drawer-overlay">
+    <div class="dash-drawer" id="dash-drawer"></div>
+  </div>
 `;
+document.body.classList.add('has-dash-bottom-nav');
+
+let currentDashTab = 'listings';
+
+function setActiveDashTab(tab) {
+  currentDashTab = tab;
+  document.querySelectorAll('.dash-nav-link').forEach((l) => l.classList.toggle('active', l.dataset.tab === tab));
+  const activeGroup = groupForTab(tab);
+  document.querySelectorAll('.dash-bottom-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.group === activeGroup));
+}
+
+function selectDashTab(tab) {
+  setActiveDashTab(tab);
+  renderTab(tab);
+  closeDashDrawer();
+}
+
+function closeDashDrawer() {
+  document.getElementById('dash-drawer-overlay').classList.remove('open');
+}
+
+function openDashDrawer(groupKey) {
+  const group = DASH_NAV_GROUPS[groupKey];
+  const drawer = document.getElementById('dash-drawer');
+  drawer.innerHTML = `
+    <div class="dash-drawer-handle"></div>
+    <div class="dash-drawer-title">${escapeHtml(group.label)}</div>
+    ${group.tabs.map(([t, label]) => navLinkHtml(t, label)).join('')}
+  `;
+  drawer.querySelectorAll('.dash-nav-link').forEach((link) => {
+    link.addEventListener('click', () => selectDashTab(link.dataset.tab));
+  });
+  setActiveDashTab(currentDashTab);
+  document.getElementById('dash-drawer-overlay').classList.add('open');
+}
+
+document.getElementById('dash-drawer-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'dash-drawer-overlay') closeDashDrawer();
+});
+document.querySelectorAll('.dash-bottom-nav-item').forEach((btn) => {
+  btn.addEventListener('click', () => openDashDrawer(btn.dataset.group));
+});
 
 (async () => {
   try {
     const termsStatus = await apiFetch('/api/terms/status/');
     if (termsStatus.needs_acceptance) {
       document.getElementById('terms-banner').innerHTML = `
-        <div class="alert alert-info" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:var(--space-4);">
+        <div class="alert alert-info" style="display:flex; align-items:center; justify-content:space-between; gap: var(--space-3); flex-wrap:wrap; margin-bottom:var(--space-4);">
           <span>Our <a href="terms.html" target="_blank" style="font-weight:600;">Terms &amp; Conditions</a> have been updated (v${escapeHtml(termsStatus.current_version)}). Please review and re-accept to continue.</span>
           <button class="btn btn-sm" id="terms-reaccept-btn">I accept</button>
         </div>
@@ -83,12 +156,8 @@ gate.innerHTML = `
   } catch (e) { /* non-fatal */ }
 })();
 
-document.querySelectorAll('.dash-tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.dash-tab').forEach((t) => t.classList.remove('active'));
-    tab.classList.add('active');
-    renderTab(tab.dataset.tab);
-  });
+document.querySelectorAll('.dash-nav-link').forEach((link) => {
+  link.addEventListener('click', () => selectDashTab(link.dataset.tab));
 });
 
 /* Country -> Region -> District hierarchy (real Tanzanian administrative
@@ -157,7 +226,7 @@ function mountLocationPicker(container, hiddenId, currentValue) {
   }
 
   container.innerHTML = `
-    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+    <div style="display:flex; gap: var(--space-2); flex-wrap:wrap;">
       <select id="${hiddenId}-region" style="flex:1; min-width:120px;">
         <option value="">Region&hellip;</option>
         ${regions.map((r) => `<option value="${escapeHtml(r)}" ${r === prefillRegion ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
@@ -166,10 +235,10 @@ function mountLocationPicker(container, hiddenId, currentValue) {
         <option value="">District&hellip;</option>
       </select>
     </div>
-    <div id="${hiddenId}-ward-wrap" class="hidden" style="margin-top:6px;">
+    <div id="${hiddenId}-ward-wrap" class="hidden" style="margin-top: var(--space-2);">
       <select id="${hiddenId}-ward" style="width:100%;"><option value="">Ward&hellip;</option></select>
     </div>
-    <input type="text" id="${hiddenId}-city" placeholder="City / area (optional)" value="${escapeHtml(prefillCity)}" style="margin-top:6px;">
+    <input type="text" id="${hiddenId}-city" placeholder="City / area (optional)" value="${escapeHtml(prefillCity)}" style="margin-top: var(--space-2);">
     <input type="hidden" id="${hiddenId}">
   `;
 
@@ -222,7 +291,7 @@ async function loadMe() {
     const kycMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' };
     el.innerHTML = `
       <h3 style="margin-bottom:var(--space-1);">${escapeHtml(me.username)}</h3>
-      <p class="text-muted" style="margin:0 0 12px 0; font-size:0.85rem;">${escapeHtml(me.email)}</p>
+      <p class="text-muted" style="margin: 0 0 var(--space-3) 0; font-size:0.85rem;">${escapeHtml(me.email)}</p>
       <p style="font-size:0.85rem;">Role: <strong>${escapeHtml((me.role || '').replace('_', ' '))}</strong></p>
       <p style="font-size:0.85rem;">ID verification: ${pillForStatus(me.id_verification_status, kycMap)}</p>
       ${me.id_verification_status !== 'verified' ? `<p class="form-hint">Submit ID verification (via the API's /api/accounts/kyc/ endpoint) before you can sell.</p>` : ''}
@@ -238,7 +307,7 @@ async function loadWallet() {
     const data = await apiFetch('/api/wallet/me/');
     const held = Number(data.wallet.pending_balance);
     el.innerHTML = `
-      <p class="text-muted" style="margin:0 0 4px 0; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em;">Available to withdraw</p>
+      <p class="text-muted" style="margin: 0 0 var(--space-1) 0; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.06em;">Available to withdraw</p>
       <div class="wallet-balance">${Number(data.wallet.available_balance).toLocaleString()} <span class="wallet-currency">${escapeHtml(data.wallet.currency)}</span></div>
       ${held > 0 ? `<p class="form-hint">${held.toLocaleString()} ${escapeHtml(data.wallet.currency)} held from recent sales, releases automatically after the payout hold period.</p>` : ''}
       <p class="form-hint">${data.recent_transactions.length} recent transaction(s)</p>
@@ -275,10 +344,10 @@ async function renderListingsTab(content) {
       return;
     }
     content.innerHTML = results.map((l) => `
-      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
+      <div class="card" style="padding: var(--space-5) var(--space-5); margin-bottom:var(--space-3);">
         <div class="flex-between">
           <div>
-            <h3 style="margin:0 0 6px 0;">${escapeHtml(l.title)}</h3>
+            <h3 style="margin: 0 0 var(--space-2) 0;">${escapeHtml(l.title)}</h3>
             <p class="text-muted" style="margin:0; font-size:0.85rem;">${money(l.price, l.currency)} &middot; ${escapeHtml(l.purchase_count)} sold &middot; ${escapeHtml(l.view_count)} views &middot; ${l.cover_image ? '1+' : '0'} media</p>
           </div>
           <div style="text-align:right;">
@@ -292,8 +361,8 @@ async function renderListingsTab(content) {
             </div>
           </div>
         </div>
-        <div class="edit-listing-area hidden" id="edit-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);"></div>
-        <div class="correction-area hidden" id="correction-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+        <div class="edit-listing-area hidden" id="edit-area-${l.slug}" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);"></div>
+        <div class="correction-area hidden" id="correction-area-${l.slug}" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);">
           <div id="correction-alert-${l.slug}"></div>
           <div id="correction-history-${l.slug}"></div>
           <form class="correction-form" data-slug="${l.slug}">
@@ -301,14 +370,14 @@ async function renderListingsTab(content) {
               <label for="correction-text-${l.slug}">Correction text (visible to everyone, and emailed to every past buyer)</label>
               <textarea id="correction-text-${l.slug}" style="min-height:60px;" required></textarea>
             </div>
-            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:var(--space-3);">
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap: var(--space-2); margin-bottom:var(--space-3);">
               <input type="checkbox" id="correction-retraction-${l.slug}" style="width:auto;">
               This is a retraction (the story is materially wrong, not just amended)
             </label>
             <button type="submit" class="btn btn-sm">Post correction</button>
           </form>
         </div>
-        <div class="media-upload-area hidden" id="media-area-${l.slug}" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+        <div class="media-upload-area hidden" id="media-area-${l.slug}" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);">
           <div id="media-alert-${l.slug}"></div>
           <form class="media-form" data-slug="${l.slug}">
             <div class="field-row">
@@ -325,13 +394,13 @@ async function renderListingsTab(content) {
                 <input type="file" id="media-file-${l.slug}" accept="image/*,video/*" required>
               </div>
             </div>
-            <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; margin-bottom:var(--space-3);">
+            <label style="font-size:0.85rem; display:flex; align-items:center; gap: var(--space-2); margin-bottom:var(--space-3);">
               <input type="checkbox" id="media-cover-${l.slug}" checked style="width:auto;">
               Use as cover image
             </label>
             <details style="margin-bottom:var(--space-3);">
               <summary style="cursor:pointer; font-size:0.82rem; color:var(--color-text-muted);">Wire metadata (optional)</summary>
-              <div class="field-row" style="margin-top:10px;">
+              <div class="field-row" style="margin-top: var(--space-3);">
                 <div class="form-group">
                   <label for="media-credit-${l.slug}">Credit line</label>
                   <input type="text" id="media-credit-${l.slug}" placeholder="Photo: Jane Reporter / WEMIX">
@@ -488,7 +557,7 @@ async function loadCorrectionHistory(slug, area) {
     historyEl.innerHTML = corrections.length ? corrections.map((c) => `
       <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:var(--space-2);">
         <strong>${c.is_retraction ? 'Retraction' : 'Correction'} &middot; ${timeAgo(c.created_at)}</strong>
-        <p style="margin:4px 0 0 0;">${escapeHtml(c.text)}</p>
+        <p style="margin: var(--space-1) 0 0 0;">${escapeHtml(c.text)}</p>
       </div>
     `).join('') : '<p class="text-muted" style="font-size:0.85rem;">No corrections issued yet.</p>';
   } catch (err) {
@@ -656,7 +725,7 @@ async function loadCorporateCard(me) {
         </form>
       `}
       ${submissions.length ? `
-        <h5 style="margin:16px 0 8px 0;">Submission history</h5>
+        <h5 style="margin: var(--space-4) 0 var(--space-2) 0;">Submission history</h5>
         ${submissions.map((s) => `
           <div class="table-row">
             <span>${escapeHtml(s.company_name)}</span>
@@ -718,7 +787,7 @@ async function renderVerificationTab(content) {
     const history = submissions.results || submissions;
 
     content.innerHTML = `
-      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
+      <div class="card" style="padding: var(--space-6); margin-bottom:var(--space-5);">
         <div class="flex-between" style="margin-bottom:var(--space-1);">
           <h3 style="margin:0;">Identity verification</h3>
           ${pillForStatus(me.id_verification_status, { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected', unsubmitted: 'pill-draft' })}
@@ -766,7 +835,7 @@ async function renderVerificationTab(content) {
       </div>
 
       ${['journalist', 'media_house'].includes(me.role) ? `
-        <div class="card" style="padding:18px 22px; margin-bottom:var(--space-5);">
+        <div class="card" style="padding: var(--space-5) var(--space-6); margin-bottom:var(--space-5);">
           <div class="flex-between">
             <span>Journalist tier: <strong>${escapeHtml((me.journalist_tier || 'none').replace('_', ' '))}</strong></span>
             ${me.is_press_credentialed ? '<span class="pill pill-verified">&#10003; Verified Professional Journalist</span>' : (me.journalist_tier === 'professional' ? '<span class="pill pill-pending">Press credential pending</span>' : '')}
@@ -774,7 +843,7 @@ async function renderVerificationTab(content) {
         </div>
       ` : ''}
 
-      <h4 style="margin-bottom:10px;">Submission history</h4>
+      <h4 style="margin-bottom: var(--space-3);">Submission history</h4>
       ${history.length ? history.map((h) => `
         <div class="table-row">
           <span>${escapeHtml((h.id_type || '').toUpperCase())}</span>
@@ -785,22 +854,22 @@ async function renderVerificationTab(content) {
       `).join('') : '<p class="text-muted">No submissions yet.</p>'}
 
       ${me.role === 'buyer' ? `
-        <div class="card" id="corporate-card" style="padding:22px; margin-top:var(--space-6);">
+        <div class="card" id="corporate-card" style="padding: var(--space-6); margin-top:var(--space-6);">
           <p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
         </div>
       ` : ''}
 
-      <div class="card" style="padding:22px; margin-top:var(--space-6); border-color:#f3cfcc;">
+      <div class="card" style="padding: var(--space-6); margin-top:var(--space-6); border-color:#f3cfcc;">
         <h4 style="margin-top:0; color:var(--color-danger);">Danger zone</h4>
         <p class="text-muted" style="font-size:0.85rem;">Deactivating your account blocks future login and unpublishes your live listings. Buyers who already purchased from you keep access. This cannot be undone by you -- contact support to reactivate.</p>
         <div id="deactivate-alert"></div>
         <button class="btn btn-outline btn-sm" id="deactivate-toggle-btn" style="border-color:var(--color-danger); color:var(--color-danger);">Deactivate my account</button>
-        <div id="deactivate-form-area" class="hidden" style="margin-top:14px;">
+        <div id="deactivate-form-area" class="hidden" style="margin-top: var(--space-4);">
           <div class="form-group">
             <label for="deactivate-password">Confirm your password</label>
             <input type="password" id="deactivate-password">
           </div>
-          <button class="btn btn-sm" id="deactivate-confirm-btn" style="background:var(--color-danger); border-color:var(--color-danger);">Yes, deactivate permanently</button>
+          <button class="btn btn-sm btn-danger" id="deactivate-confirm-btn">Yes, deactivate permanently</button>
         </div>
       </div>
     `;
@@ -1005,12 +1074,12 @@ async function renderFollowingTab(content) {
       return;
     }
     content.innerHTML = results.map((f) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between">
           <div>
             <strong>${escapeHtml(f.username)}</strong>
             ${f.organization_name ? `<span class="text-muted"> &middot; ${escapeHtml(f.organization_name)}</span>` : ''}
-            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.85rem;">${f.published_listing_count} published listing${f.published_listing_count === 1 ? '' : 's'} &middot; followed ${timeAgo(f.followed_at)}</p>
+            <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.85rem;">${f.published_listing_count} published listing${f.published_listing_count === 1 ? '' : 's'} &middot; followed ${timeAgo(f.followed_at)}</p>
           </div>
           <button class="btn btn-outline btn-sm following-unfollow-btn" data-followed-id="${f.followed_id}">Unfollow</button>
         </div>
@@ -1044,11 +1113,11 @@ async function renderBookmarksTab(content) {
     }
     const statusMap = { published: 'pill-verified', draft: 'pill-draft', submitted: 'pill-pending' };
     content.innerHTML = results.map((b) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between">
           <div>
             <a href="listing.html?slug=${encodeURIComponent(b.listing.slug)}" style="font-weight:600;">${escapeHtml(b.listing.title)}</a>
-            <p class="text-muted" style="margin:4px 0 0 0; font-size:0.85rem;">${escapeHtml(b.listing.seller_username || '')} &middot; ${money(b.listing.price, b.listing.currency)} &middot; saved ${timeAgo(b.bookmarked_at)}</p>
+            <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.85rem;">${escapeHtml(b.listing.seller_username || '')} &middot; ${money(b.listing.price, b.listing.currency)} &middot; saved ${timeAgo(b.bookmarked_at)}</p>
           </div>
           <div style="text-align:right;">
             ${pillForStatus(b.listing.status, statusMap)}
@@ -1087,11 +1156,11 @@ async function renderPurchasesTab(content) {
     }
     const statusMap = { paid: 'pill-verified', pending_payment: 'pill-pending', failed: 'pill-rejected', cancelled: 'pill-rejected', refunded: 'pill-draft' };
     content.innerHTML = results.map((o) => `
-      <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
-        <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap:8px;">
+      <div class="card card-compact" style="margin-bottom:var(--space-2);">
+        <div class="flex-between" style="align-items:center; flex-wrap:wrap; gap: var(--space-2);">
           <div>
             <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" style="font-weight:600;">${escapeHtml(o.listing_title)}</a>
-            <p class="text-muted" style="margin:2px 0 0 0; font-size:0.82rem;">${money(o.amount, o.currency)} &middot; ${pillForStatus(o.status, statusMap)} &middot; ${timeAgo(o.created_at)}</p>
+            <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.82rem;">${money(o.amount, o.currency)} &middot; ${pillForStatus(o.status, statusMap)} &middot; ${timeAgo(o.created_at)}</p>
           </div>
           ${o.status === 'paid' ? `<button class="btn btn-outline btn-sm refund-request-btn" data-order-id="${o.id}" data-title="${escapeHtml(o.listing_title)}">Request refund</button>` : ''}
         </div>
@@ -1149,7 +1218,7 @@ async function renderWithdrawalsTab(content) {
     const payoutStatusMap = { verified: 'pill-verified', pending: 'pill-pending', rejected: 'pill-rejected' };
 
     content.innerHTML = `
-      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
+      <div class="card" style="padding: var(--space-6); margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Payout accounts</h3>
         <p class="text-muted" style="margin-top:-8px;">Add a mobile money or bank account. A moderator verifies it once, then you can withdraw to it anytime.</p>
         <div id="payout-alert"></div>
@@ -1190,7 +1259,7 @@ async function renderWithdrawalsTab(content) {
         </form>
       </div>
 
-      <div class="card" style="padding:22px; margin-bottom:var(--space-5);">
+      <div class="card" style="padding: var(--space-6); margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Request a withdrawal</h3>
         <p class="text-muted" style="margin-top:-8px;">Available balance: <strong>${money(walletData.wallet.available_balance, walletData.wallet.currency)}</strong>${Number(walletData.wallet.pending_balance) > 0 ? ` <span class="text-muted">(${money(walletData.wallet.pending_balance, walletData.wallet.currency)} held from recent sales)</span>` : ''}</p>
         <div id="withdraw-alert"></div>
@@ -1213,7 +1282,7 @@ async function renderWithdrawalsTab(content) {
         ` : `<div class="alert alert-info">Add and verify a payout account above before requesting a withdrawal.</div>`}
       </div>
 
-      <h4 style="margin-bottom:10px;">Withdrawal history</h4>
+      <h4 style="margin-bottom: var(--space-3);">Withdrawal history</h4>
       <div id="withdraw-list">
         ${results.length ? results.map((w) => `
           <div class="table-row">
@@ -1321,7 +1390,7 @@ async function renderSupportTab(content) {
         <button type="submit" class="btn btn-sm" id="ticket-submit-btn">Submit</button>
       </form>
     </div>
-    <h4 style="margin-bottom:10px;">My tickets</h4>
+    <h4 style="margin-bottom: var(--space-3);">My tickets</h4>
     <div id="ticket-list"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
   `;
 
@@ -1337,18 +1406,18 @@ async function renderSupportTab(content) {
         return;
       }
       listEl.innerHTML = results.map((t) => `
-        <div class="card" style="padding:16px 18px; margin-bottom:10px;">
+        <div class="card card-compact" style="margin-bottom: var(--space-3);">
           <div class="flex-between" style="align-items:flex-start;">
             <div>
               <strong>${escapeHtml(t.subject)}</strong>
-              <span class="pill pill-draft" style="margin-left:6px;">${escapeHtml((t.category || '').replace('_', ' '))}</span>
+              <span class="pill pill-draft" style="margin-left: var(--space-2);">${escapeHtml((t.category || '').replace('_', ' '))}</span>
               ${pillForStatus(t.status, statusMap)}
-              <p class="text-muted" style="margin:6px 0 0 0; font-size:0.85rem;">${escapeHtml(t.message)}</p>
-              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
+              <p class="text-muted" style="margin: var(--space-2) 0 0 0; font-size:0.85rem;">${escapeHtml(t.message)}</p>
+              <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
             </div>
           </div>
           ${(t.messages || []).length ? `
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap:8px;">
+            <div style="margin-top: var(--space-3); padding-top: var(--space-3); border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap: var(--space-2);">
               ${t.messages.map((m) => `
                 <div style="font-size:0.85rem;">
                   <strong>${m.is_staff_reply ? 'Support' : escapeHtml(m.author_username)}:</strong>
@@ -1359,7 +1428,7 @@ async function renderSupportTab(content) {
             </div>
           ` : ''}
           ${t.status !== 'closed' ? `
-            <div style="margin-top:10px; display:flex; gap:8px;">
+            <div style="margin-top: var(--space-3); display:flex; gap: var(--space-2);">
               <input type="text" class="ticket-reply-input" data-id="${t.id}" placeholder="Add a reply&hellip;" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
               <button class="btn btn-sm ticket-reply-btn" data-id="${t.id}">Send</button>
             </div>
@@ -1450,7 +1519,7 @@ async function renderSubscriptionsTab(content) {
             </div>
           </div>
           <button class="btn btn-sm" id="sub-price-save">Save</button>
-          <h4 style="margin-top:var(--space-6); margin-bottom:10px;">My subscribers (${subscribers.length})</h4>
+          <h4 style="margin-top:var(--space-6); margin-bottom: var(--space-3);">My subscribers (${subscribers.length})</h4>
           ${subscribers.length ? subscribers.map((s) => `
             <div class="table-row">
               <span>${escapeHtml(s.subscriber_username)}</span>
@@ -1462,14 +1531,14 @@ async function renderSubscriptionsTab(content) {
         </div>
       ` : ''}
 
-      <h4 style="margin-bottom:10px;">Sellers I'm subscribed to</h4>
+      <h4 style="margin-bottom: var(--space-3);">Sellers I'm subscribed to</h4>
       <div id="my-subs-list">
         ${mine.length ? mine.map((s) => `
-          <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
+          <div class="card card-compact" style="margin-bottom:var(--space-2);">
             <div class="flex-between">
               <div>
                 <strong>${escapeHtml(s.seller_username)}</strong> &middot; ${money(s.price)}/mo
-                <p class="text-muted" style="margin:4px 0 0 0; font-size:0.82rem;">${pillForStatus(s.status, statusMap)} ${s.current_period_end ? '&middot; renews/ends ' + new Date(s.current_period_end).toLocaleDateString() : ''}</p>
+                <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.82rem;">${pillForStatus(s.status, statusMap)} ${s.current_period_end ? '&middot; renews/ends ' + new Date(s.current_period_end).toLocaleDateString() : ''}</p>
               </div>
               ${s.status === 'active' ? `<button class="btn btn-outline btn-sm sub-cancel-btn" data-id="${s.id}">Cancel</button>` : ''}
             </div>
@@ -1550,7 +1619,7 @@ async function renderAlertsTab(content) {
         <button type="submit" class="btn btn-sm">Create alert</button>
       </form>
     </div>
-    <h4 style="margin-bottom:10px;">My alerts</h4>
+    <h4 style="margin-bottom: var(--space-3);">My alerts</h4>
     <div id="alert-list"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
   `;
 
@@ -1618,7 +1687,7 @@ async function renderDeveloperTab(content) {
       <p class="text-muted" style="margin-top:-8px;">Download everything WEMIX has on your account -- profile, listings, orders, wallet history, and more -- as a JSON file.</p>
       <button class="btn btn-outline btn-sm" id="export-data-btn">Export my data</button>
     </div>
-    <div class="card" style="padding:var(--space-5);">
+    <div class="card">
       <h3 style="margin-top:0;">API keys</h3>
       <p class="text-muted" style="margin-top:-8px;">For enterprise/newsroom integrations that need programmatic access instead of a browser login. Send it as <code>Authorization: Api-Key &lt;key&gt;</code>.</p>
       <div id="apikey-alert"></div>
@@ -1630,7 +1699,7 @@ async function renderDeveloperTab(content) {
       </div>
       <button class="btn btn-sm" id="apikey-create-btn">Generate new key</button>
       <div id="apikey-new-value" style="margin-top:var(--space-3);"></div>
-      <h4 style="margin-top:var(--space-5); margin-bottom:10px;">Your keys</h4>
+      <h4 style="margin-top:var(--space-5); margin-bottom: var(--space-3);">Your keys</h4>
       <div id="apikey-list"></div>
     </div>
   `;
@@ -1700,8 +1769,8 @@ async function renderDeveloperTab(content) {
       document.getElementById('apikey-new-value').innerHTML = `
         <div class="alert alert-success">
           <strong>Copy this now -- it won't be shown again:</strong>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:var(--space-2);">
-            <input type="text" readonly value="${escapeHtml(result.raw_key)}" style="flex:1; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="apikey-raw-input">
+          <div style="display:flex; gap: var(--space-2); align-items:center; margin-top:var(--space-2);">
+            <input type="text" readonly value="${escapeHtml(result.raw_key)}" style="flex:1; padding: var(--space-2) var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="apikey-raw-input">
             <button class="btn btn-sm" id="apikey-copy-btn">Copy</button>
           </div>
         </div>
@@ -1723,7 +1792,16 @@ async function renderDeveloperTab(content) {
 
 loadMe();
 loadWallet();
-renderTab('listings');
+// Deep-link support: notifications across the app link here with
+// ?tab=withdrawals etc. (see core/notifications.py's link_path values)
+// -- previously dead, since nothing ever read the query param and every
+// such link silently landed on the default "My Listings" tab instead.
+const ALL_DASH_TABS = new Set(Object.values(DASH_NAV_GROUPS).flatMap((g) => g.tabs.map(([t]) => t)));
+const requestedTab = new URLSearchParams(window.location.search).get('tab');
+const initialDashTab = ALL_DASH_TABS.has(requestedTab) ? requestedTab : 'listings';
+document.querySelector(`details[data-group="${groupForTab(initialDashTab)}"]`)?.setAttribute('open', '');
+setActiveDashTab(initialDashTab);
+renderTab(initialDashTab);
 </script>
 </body>
 </html>

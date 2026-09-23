@@ -4,13 +4,14 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import APIKey, AuditLog, Notification, SupportTicket, TermsAcceptance
+from .models import APIKey, AuditLog, Notification, PlatformSetting, StaticPage, SupportTicket, TermsAcceptance
 from .permissions import IsAdminOrAbove, IsModeratorOrAbove
 from .serializers import (
     APIKeyCreateSerializer,
     APIKeySerializer,
     AuditLogSerializer,
     NotificationSerializer,
+    StaticPageSerializer,
     SupportTicketReplySerializer,
     SupportTicketSerializer,
     TermsAcceptanceSerializer,
@@ -358,6 +359,91 @@ class APIKeyAdminRevokeView(APIView):
             description=f"API key '{api_key.name}' revoked by staff for user {api_key.user_id}.",
         )
         return Response(APIKeySerializer(api_key).data)
+
+
+class StaticPageListCreateView(generics.ListCreateAPIView):
+    """GET /api/static-pages/ -- public visitors see only published
+    pages; staff see everything (drafts included) for the management
+    UI. POST is staff-only."""
+
+    serializer_class = StaticPageSerializer
+    pagination_class = None  # a bounded handful of pages -- same reasoning as UserAPIKeyListView
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsModeratorOrAbove()]
+        return [permissions.AllowAny()]
+
+    def get_queryset(self):
+        qs = StaticPage.objects.all()
+        user = self.request.user
+        is_staff = user.is_authenticated and (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        if not is_staff:
+            qs = qs.filter(is_published=True)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+
+class StaticPageDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET /api/static-pages/<slug>/ -- public if published, staff-only
+    otherwise. Write methods are always staff-only."""
+
+    serializer_class = StaticPageSerializer
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [permissions.AllowAny()]
+        return [IsModeratorOrAbove()]
+
+    def get_queryset(self):
+        qs = StaticPage.objects.all()
+        user = self.request.user
+        is_staff = user.is_authenticated and (
+            user.role in {user.Role.MODERATOR, user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff
+        )
+        if self.request.method == "GET" and not is_staff:
+            qs = qs.filter(is_published=True)
+        return qs
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+
+SOCIAL_LINKS_SETTING_KEY = "social_links"
+SOCIAL_PLATFORMS = ["facebook", "instagram", "x", "linkedin", "youtube", "tiktok", "telegram", "whatsapp"]
+
+
+class SocialLinksView(APIView):
+    """GET (public): the platform's real social media links, stored as a
+    single PlatformSetting row -- empty dict if never configured. PUT
+    (moderator+): replace them. No hardcoded social URLs anywhere in the
+    frontend; the footer renders exactly (and only) what's set here."""
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [permissions.AllowAny()]
+        return [IsModeratorOrAbove()]
+
+    def get(self, request):
+        setting = PlatformSetting.objects.filter(key=SOCIAL_LINKS_SETTING_KEY).first()
+        return Response(setting.value if setting else {})
+
+    def put(self, request):
+        links = {k: v.strip() for k, v in request.data.items() if k in SOCIAL_PLATFORMS and isinstance(v, str) and v.strip()}
+        setting, _ = PlatformSetting.objects.update_or_create(
+            key=SOCIAL_LINKS_SETTING_KEY,
+            defaults={"value": links, "description": "Platform social media links, shown in the site footer."},
+        )
+        AuditLog.objects.create(
+            actor=request.user, action=AuditLog.Action.SETTINGS_CHANGE, target_model="PlatformSetting",
+            target_id=str(setting.id), description="Platform social links updated.",
+        )
+        return Response(setting.value)
 
 
 class AuditLogListView(generics.ListAPIView):

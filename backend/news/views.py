@@ -120,6 +120,8 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         params = self.request.query_params
         category = params.get("category")
         news_type = params.get("news_type")
+        seller = params.get("seller")
+        exclude_slug = params.get("exclude_slug")
         q = params.get("q")
         min_price = params.get("min_price")
         max_price = params.get("max_price")
@@ -131,6 +133,13 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             qs = qs.filter(category__slug=category)
         if news_type:
             qs = qs.filter(news_type=news_type)
+        if seller:
+            qs = qs.filter(seller_id=seller)
+        if exclude_slug:
+            # "More from this seller" / "Related stories" both list
+            # against the listing they're shown on -- without this the
+            # story itself is the first result in its own related list.
+            qs = qs.exclude(slug=exclude_slug)
         if location:
             qs = qs.filter(location__icontains=location)
         if min_price:
@@ -624,7 +633,16 @@ class NewsListingViewSet(viewsets.ModelViewSet):
             "x": f"https://twitter.com/intent/tweet?text={urllib.parse.quote(listing.title, safe='')}&url={urllib.parse.quote(listing_url, safe='')}",
             "linkedin": f"https://www.linkedin.com/sharing/share-offsite/?url={urllib.parse.quote(listing_url, safe='')}",
             "whatsapp": f"https://api.whatsapp.com/send?text={urllib.parse.quote(caption, safe='')}",
+            "telegram": f"https://t.me/share/url?url={urllib.parse.quote(listing_url, safe='')}&text={urllib.parse.quote(listing.title, safe='')}",
+            "email": f"mailto:?subject={urllib.parse.quote(listing.title, safe='')}&body={urllib.parse.quote(caption, safe='')}",
         }
+
+        if provider == SocialShareRecord.Provider.COPY_LINK:
+            # No popup to open -- the frontend copies listing_url to the
+            # clipboard itself. Still logged above like every other share,
+            # since copying a link to paste elsewhere is exactly the kind
+            # of usage this table exists to track.
+            return Response({"manual": False, "copy": True, "share_url": listing_url})
 
         if provider in SHARE_INTENT_URLS:
             return Response({"manual": False, "share_url": SHARE_INTENT_URLS[provider]})

@@ -21,7 +21,7 @@ function renderNav() {
 
   root.innerHTML = `
     <nav class="topnav">
-      <div class="topnav-inner">
+      <div class="topnav-inner container">
         <a href="index.html" class="brand">
           <img src="images/wemix.jpeg" alt="Wemix" class="brand-logo">
         </a>

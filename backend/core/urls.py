@@ -20,4 +20,7 @@ urlpatterns = [
     path("terms/accept/", views.TermsAcceptView.as_view(), name="terms-accept"),
     path("support-tickets/", views.SupportTicketListCreateView.as_view(), name="support-ticket-list-create"),
     path("support-tickets/<uuid:pk>/reply/", views.SupportTicketReplyView.as_view(), name="support-ticket-reply"),
+    path("static-pages/", views.StaticPageListCreateView.as_view(), name="static-page-list-create"),
+    path("static-pages/<slug:slug>/", views.StaticPageDetailView.as_view(), name="static-page-detail"),
+    path("social-links/", views.SocialLinksView.as_view(), name="social-links"),
 ]

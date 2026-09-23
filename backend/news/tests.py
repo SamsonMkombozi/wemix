@@ -116,6 +116,79 @@ class ListingSearchTests(APITestCase):
         self.assertEqual(slugs, [cheap_body_match.slug, expensive_title_match.slug])
 
 
+class SellerFilterAndProfileTests(APITestCase):
+    """The listing.html conversion redesign needs: a `seller` filter (for
+    "More from this seller"), an `exclude_slug` filter (so a listing
+    never lists itself as "related"), and richer seller-profile fields
+    on the detail response (listing count, total sales, join date,
+    overall rating, review count, recent-purchase social proof)."""
+
+    def setUp(self):
+        self.seller = make_seller()
+        self.other_seller = make_seller("otherseller1")
+        self.buyer = make_buyer()
+        self.category = make_category()
+
+    def _make_listing(self, seller, title, purchase_count=0, **extra):
+        return NewsListing.objects.create(
+            seller=seller, title=title, description="d", body="b", news_type=NewsListing.NewsType.TEXT,
+            category=self.category, price=Decimal("1000"), status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status=NewsListing.VerificationStatus.VERIFIED, purchase_count=purchase_count,
+            **extra,
+        )
+
+    def test_seller_filter_returns_only_that_sellers_listings(self):
+        mine = self._make_listing(self.seller, "Mine")
+        self._make_listing(self.other_seller, "Not mine")
+        resp = self.client.get(f"/api/news/listings/?seller={self.seller.id}")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [mine.slug])
+
+    def test_exclude_slug_omits_that_listing(self):
+        keep = self._make_listing(self.seller, "Keep this one")
+        exclude = self._make_listing(self.seller, "Exclude this one")
+        resp = self.client.get(f"/api/news/listings/?exclude_slug={exclude.slug}")
+        slugs = [r["slug"] for r in resp.data["results"]]
+        self.assertEqual(slugs, [keep.slug])
+
+    def test_detail_response_includes_seller_listing_count_and_sales(self):
+        self._make_listing(self.seller, "First", purchase_count=3)
+        listing = self._make_listing(self.seller, "Second", purchase_count=2)
+        resp = self.client.get(f"/api/news/listings/{listing.slug}/")
+        self.assertEqual(resp.data["seller_listing_count"], 2)
+        self.assertEqual(resp.data["seller_total_sales"], 5)
+        self.assertIsNotNone(resp.data["seller_join_date"])
+
+    def test_detail_response_includes_seller_wide_rating(self):
+        from .models import Review
+        from payments.models import Order
+
+        listing = self._make_listing(self.seller, "Rated story")
+        order = Order.objects.create(buyer=self.buyer, listing=listing, amount=listing.price, status=Order.Status.PAID)
+        Review.objects.create(listing=listing, order=order, reviewer=self.buyer, rating=4)
+
+        resp = self.client.get(f"/api/news/listings/{listing.slug}/")
+        self.assertEqual(resp.data["seller_overall_rating"], 4.0)
+        self.assertEqual(resp.data["seller_review_count"], 1)
+
+    def test_detail_response_has_no_rating_when_seller_has_no_reviews(self):
+        listing = self._make_listing(self.seller, "Unrated story")
+        resp = self.client.get(f"/api/news/listings/{listing.slug}/")
+        self.assertIsNone(resp.data["seller_overall_rating"])
+        self.assertEqual(resp.data["seller_review_count"], 0)
+
+    def test_recent_purchase_count_reflects_real_paid_orders_this_week(self):
+        from payments.models import Order
+
+        listing = self._make_listing(self.seller, "Popular story")
+        Order.objects.create(buyer=self.buyer, listing=listing, amount=listing.price, status=Order.Status.PAID)
+        Order.objects.create(buyer=make_buyer("buyer2"), listing=listing, amount=listing.price, status=Order.Status.PAID)
+        Order.objects.create(buyer=make_buyer("buyer3"), listing=listing, amount=listing.price, status=Order.Status.PENDING_PAYMENT)
+
+        resp = self.client.get(f"/api/news/listings/{listing.slug}/")
+        self.assertEqual(resp.data["recent_purchase_count"], 2)
+
+
 class SubmitForReviewTests(APITestCase):
     """Exercises the submit() action end-to-end through its Celery task
     (news/tasks.py::process_listing_submission_task) in the default
@@ -824,3 +897,32 @@ class DownloadAndSocialShareAccessTests(APITestCase):
         self.client.force_authenticate(self.buyer)
         resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "myspace"})
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_buyer_gets_real_share_url_for_telegram(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "telegram"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["manual"])
+        self.assertIn("t.me", resp.data["share_url"])
+
+    def test_buyer_gets_mailto_url_for_email(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "email"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["manual"])
+        self.assertTrue(resp.data["share_url"].startswith("mailto:"))
+
+    def test_copy_link_returns_the_listing_url_flagged_for_copying(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "copy_link"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["copy"])
+        self.assertIn(self.listing.slug, resp.data["share_url"])
+
+    def test_every_share_is_logged_regardless_of_provider_category(self):
+        from .models import SocialShareRecord
+
+        self.client.force_authenticate(self.buyer)
+        for provider in ["facebook", "telegram", "email", "copy_link", "instagram"]:
+            self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": provider})
+        self.assertEqual(SocialShareRecord.objects.filter(listing=self.listing, user=self.buyer).count(), 5)

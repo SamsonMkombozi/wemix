@@ -17,6 +17,36 @@ def read_email_verification_token(token: str, max_age: int = EMAIL_VERIFICATION_
     return signing.loads(token, salt=EMAIL_VERIFICATION_SALT, max_age=max_age)
 
 
+def send_password_reset_email(user, uid: str, token: str) -> None:
+    """Same silent-degrade contract as send_verification_email: a broken
+    mail transport must never surface to the caller (the request-reset
+    endpoint always returns a generic "if that email exists" response
+    regardless of whether the send actually worked, so there's nothing
+    useful to propagate here anyway)."""
+    reset_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/reset-password.html?uid={uid}&token={token}"
+    subject = "Reset your WEMIX password"
+    text_body = (
+        f"Hello {user.get_full_name() or user.username},\n\n"
+        f"Someone requested a password reset for this account. If this was you, open the link "
+        f"below to choose a new password:\n{reset_url}\n\n"
+        f"This link expires in 24 hours and can only be used once. If you did not request this, "
+        f"you can safely ignore this email -- your password has not been changed."
+    )
+    try:
+        from core.credentials import get_effective_from_email, get_email_connection
+
+        send_mail(
+            subject=subject,
+            message=text_body,
+            from_email=get_effective_from_email(),
+            recipient_list=[user.email],
+            fail_silently=True,
+            connection=get_email_connection(),
+        )
+    except Exception:
+        pass
+
+
 def send_verification_email(user) -> None:
     token = make_email_verification_token(user)
     verify_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/verify-email?token={token}"
@@ -40,6 +70,18 @@ def send_verification_email(user) -> None:
     except Exception:
         # Never let a broken mail transport break registration.
         pass
+
+
+def blacklist_all_tokens_for_user(user) -> None:
+    """Forces every other session out once a password is changed or reset
+    -- otherwise a stolen refresh token would keep working right through
+    a password reset meant to lock the account down. Silently a no-op
+    for any outstanding token that's already expired/blacklisted (that's
+    BlacklistedToken.objects.get_or_create's job, not this function's)."""
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    for outstanding in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=outstanding)
 
 
 def log_action(*, actor, action, target_model="", target_id="", description="", request=None, metadata=None):

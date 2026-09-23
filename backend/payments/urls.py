@@ -10,6 +10,7 @@ urlpatterns = [
     path("orders/all/", views.AllOrdersListView.as_view(), name="all-orders"),
     path("orders/<uuid:id>/", views.OrderDetailView.as_view(), name="order-detail"),
     path("orders/<uuid:id>/status/", views.OrderStatusPollView.as_view(), name="order-status"),
+    path("orders/<uuid:id>/cancel/", views.OrderCancelView.as_view(), name="order-cancel"),
     path("webhooks/selcom/", views.SelcomWebhookView.as_view(), name="selcom-webhook"),
     path("webhooks/nala/", views.NalaWebhookView.as_view(), name="nala-webhook"),
     path("webhooks/selcom-subscription/", views.SelcomSubscriptionWebhookView.as_view(), name="selcom-subscription-webhook"),

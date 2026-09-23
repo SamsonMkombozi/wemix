@@ -276,3 +276,102 @@ class FaceMatchTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         created = IdentityVerification.objects.get(pk=resp.data["id"])
         self.assertEqual(created.face_match_score, 80.0)
+
+
+class PasswordResetTests(APITestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()  # DRF throttling is cache-backed, not DB-backed -- doesn't reset via transaction rollback
+        self.user = User.objects.create_user(username="pwreset1", email="pwreset1@example.com", password="OldPass123!")
+
+    def _extract_uid_token(self):
+        from django.contrib.auth.tokens import default_token_generator
+        from django.utils.encoding import force_bytes
+        from django.utils.http import urlsafe_base64_encode
+
+        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+        return uid, token
+
+    def test_request_returns_generic_response_for_known_email(self):
+        resp = self.client.post("/api/accounts/password-reset/request/", {"email": "pwreset1@example.com"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("If an account exists", resp.data["detail"])
+
+    def test_request_returns_identical_generic_response_for_unknown_email(self):
+        resp = self.client.post("/api/accounts/password-reset/request/", {"email": "nobody-here@example.com"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("If an account exists", resp.data["detail"])
+
+    def test_request_sends_a_real_email_with_a_working_link(self):
+        from django.core import mail
+
+        self.client.post("/api/accounts/password-reset/request/", {"email": "pwreset1@example.com"})
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("reset-password.html", mail.outbox[0].body)
+        self.assertIn(self.user.email, mail.outbox[0].to)
+
+    def test_confirm_with_valid_token_changes_password(self):
+        uid, token = self._extract_uid_token()
+        resp = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "BrandNewPass456!",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("BrandNewPass456!"))
+
+    def test_confirm_with_garbage_token_is_rejected(self):
+        uid, _ = self._extract_uid_token()
+        resp = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": "not-a-real-token", "new_password": "BrandNewPass456!",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("OldPass123!"))
+
+    def test_confirm_with_garbage_uid_is_rejected(self):
+        resp = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": "not-valid-base64!!", "token": "whatever", "new_password": "BrandNewPass456!",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_token_cannot_be_reused_after_password_already_changed(self):
+        uid, token = self._extract_uid_token()
+        first = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "BrandNewPass456!",
+        })
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+
+        second = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "AnotherPass789!",
+        })
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("BrandNewPass456!"))
+
+    def test_confirm_enforces_password_strength_rules(self):
+        uid, token = self._extract_uid_token()
+        resp = self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "12345",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reset_blacklists_existing_refresh_tokens(self):
+        login_resp = self.client.post("/api/accounts/login/", {"email": "pwreset1@example.com", "password": "OldPass123!"})
+        refresh_token = login_resp.data["refresh"]
+
+        uid, token = self._extract_uid_token()
+        self.client.post("/api/accounts/password-reset/confirm/", {
+            "uid": uid, "token": token, "new_password": "BrandNewPass456!",
+        })
+
+        refresh_resp = self.client.post("/api/accounts/login/refresh/", {"refresh": refresh_token})
+        self.assertEqual(refresh_resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_request_is_throttled(self):
+        for _ in range(5):
+            resp = self.client.post("/api/accounts/password-reset/request/", {"email": "pwreset1@example.com"})
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        throttled = self.client.post("/api/accounts/password-reset/request/", {"email": "pwreset1@example.com"})
+        self.assertEqual(throttled.status_code, status.HTTP_429_TOO_MANY_REQUESTS)

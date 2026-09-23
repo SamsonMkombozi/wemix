@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import APIKey, AuditLog, Notification, SupportTicket, SupportTicketMessage, TermsAcceptance
+from .models import APIKey, AuditLog, Notification, StaticPage, SupportTicket, SupportTicketMessage, TermsAcceptance
 
 
 class APIKeySerializer(serializers.ModelSerializer):
@@ -111,3 +111,12 @@ class SupportTicketReplySerializer(serializers.Serializer):
                 link_path="dashboard.html?tab=support",
             )
         return ticket
+
+
+class StaticPageSerializer(serializers.ModelSerializer):
+    updated_by_username = serializers.CharField(source="updated_by.username", read_only=True, default="")
+
+    class Meta:
+        model = StaticPage
+        fields = ["id", "slug", "title", "body", "meta_description", "is_published", "updated_by_username", "created_at", "updated_at"]
+        read_only_fields = ["id", "updated_by_username", "created_at", "updated_at"]

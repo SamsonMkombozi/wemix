@@ -243,6 +243,12 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
     is_bookmarked = serializers.SerializerMethodField()
     is_following_seller = serializers.SerializerMethodField()
     seller_follower_count = serializers.SerializerMethodField()
+    seller_listing_count = serializers.SerializerMethodField()
+    seller_total_sales = serializers.SerializerMethodField()
+    seller_join_date = serializers.DateTimeField(source="seller.date_joined", read_only=True)
+    seller_overall_rating = serializers.SerializerMethodField()
+    seller_review_count = serializers.SerializerMethodField()
+    recent_purchase_count = serializers.SerializerMethodField()
 
     def get_is_following_seller(self, obj):
         request = self.context.get("request")
@@ -252,6 +258,39 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
 
     def get_seller_follower_count(self, obj):
         return Follow.objects.filter(followed_id=obj.seller_id).count()
+
+    def get_seller_listing_count(self, obj):
+        return NewsListing.objects.filter(seller_id=obj.seller_id, status=NewsListing.ListingStatus.PUBLISHED).count()
+
+    def get_seller_total_sales(self, obj):
+        # Sum of purchase_count (itself already denormalized per listing --
+        # see Order confirmation) across every listing this seller has
+        # published, real editorial-marketplace "sold X stories" social
+        # proof, not a fabricated number.
+        from django.db.models import Sum
+
+        total = NewsListing.objects.filter(seller_id=obj.seller_id).aggregate(total=Sum("purchase_count"))["total"]
+        return total or 0
+
+    def get_seller_overall_rating(self, obj):
+        from django.db.models import Avg
+
+        avg = Review.objects.filter(listing__seller_id=obj.seller_id).aggregate(avg=Avg("rating"))["avg"]
+        return round(avg, 2) if avg is not None else None
+
+    def get_seller_review_count(self, obj):
+        return Review.objects.filter(listing__seller_id=obj.seller_id).count()
+
+    def get_recent_purchase_count(self, obj):
+        # Real count of paid orders on THIS listing in the last 7 days --
+        # honest urgency/social-proof signal (e.g. "6 purchases this
+        # week"), never a simulated "N people viewing now" figure.
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        week_ago = timezone.now() - timedelta(days=7)
+        return Order.objects.filter(listing=obj, status=Order.Status.PAID, created_at__gte=week_ago).count()
 
     def get_is_bookmarked(self, obj):
         request = self.context.get("request")
@@ -306,6 +345,12 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
             "is_bookmarked",
             "is_following_seller",
             "seller_follower_count",
+            "seller_listing_count",
+            "seller_total_sales",
+            "seller_join_date",
+            "seller_overall_rating",
+            "seller_review_count",
+            "recent_purchase_count",
             "view_count",
             "purchase_count",
             "average_rating",

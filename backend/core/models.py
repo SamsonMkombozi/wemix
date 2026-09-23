@@ -310,3 +310,26 @@ class Notification(BaseModel):
 
     def __str__(self):
         return f"{self.get_notification_type_display()} -> {self.user_id}"
+
+
+class StaticPage(BaseModel):
+    """Moderator-editable content for the informational pages every real
+    site needs (About Us, Careers, Press Center, FAQ, Privacy Policy,
+    Cookie Policy) -- previously unlinked placeholder text in the
+    footer with nothing behind it. Public GET by slug only returns a
+    page once is_published is set; staff can see/edit drafts."""
+
+    slug = models.SlugField(max_length=60, unique=True, help_text="e.g. 'about', 'careers', 'privacy-policy'.")
+    title = models.CharField(max_length=150)
+    body = models.TextField(blank=True, help_text="Plain text or simple markdown -- rendered as-is by the frontend.")
+    meta_description = models.CharField(max_length=255, blank=True)
+    is_published = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+
+    class Meta:
+        ordering = ["slug"]
+
+    def __str__(self):
+        return self.title

@@ -236,3 +236,128 @@ class SupportTicketTests(APITestCase):
         resp = self.client.post(f"/api/support-tickets/{ticket.id}/reply/", {"message": "any update?"})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(ticket.messages.count(), 1)
+
+
+class StaticPageTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="spuser", email="spuser@example.com", password="pw12345678!")
+        self.moderator = User.objects.create_user(username="spmod", email="spmod@example.com", password="pw12345678!", role=User.Role.MODERATOR)
+
+    def test_seed_migration_created_the_six_required_pages(self):
+        from .models import StaticPage
+
+        expected = {"about", "careers", "press-center", "faq", "privacy-policy", "cookie-policy"}
+        actual = set(StaticPage.objects.filter(slug__in=expected).values_list("slug", flat=True))
+        self.assertEqual(actual, expected)
+        self.assertTrue(StaticPage.objects.filter(slug__in=expected, is_published=True).count() == 6)
+
+    def test_anonymous_visitor_can_read_a_published_page(self):
+        resp = self.client.get("/api/static-pages/about/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["slug"], "about")
+
+    def test_anonymous_visitor_cannot_read_an_unpublished_page(self):
+        from .models import StaticPage
+
+        StaticPage.objects.create(slug="draft-page", title="Draft", is_published=False)
+        resp = self.client.get("/api/static-pages/draft-page/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_moderator_can_read_an_unpublished_page(self):
+        from .models import StaticPage
+
+        StaticPage.objects.create(slug="draft-page2", title="Draft", is_published=False)
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.get("/api/static-pages/draft-page2/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_anonymous_visitor_cannot_create_a_page(self):
+        resp = self.client.post("/api/static-pages/", {"slug": "hack", "title": "Hack", "body": "x"})
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_regular_user_cannot_create_a_page(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.post("/api/static-pages/", {"slug": "hack", "title": "Hack", "body": "x"})
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_moderator_can_create_and_publish_a_page(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.post("/api/static-pages/", {"slug": "new-page", "title": "New Page", "body": "Content.", "is_published": True})
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["updated_by_username"], "spmod")
+
+    def test_moderator_can_edit_an_existing_page(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.patch("/api/static-pages/about/", {"body": "Updated body."})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["body"], "Updated body.")
+
+    def test_regular_user_cannot_edit_a_page(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.patch("/api/static-pages/about/", {"body": "Hacked."})
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_moderator_list_includes_unpublished_pages(self):
+        from .models import StaticPage
+
+        StaticPage.objects.create(slug="draft-page3", title="Draft", is_published=False)
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.get("/api/static-pages/")
+        slugs = [p["slug"] for p in resp.data]
+        self.assertIn("draft-page3", slugs)
+
+    def test_public_list_excludes_unpublished_pages(self):
+        from .models import StaticPage
+
+        StaticPage.objects.create(slug="draft-page4", title="Draft", is_published=False)
+        resp = self.client.get("/api/static-pages/")
+        slugs = [p["slug"] for p in resp.data]
+        self.assertNotIn("draft-page4", slugs)
+
+
+class SocialLinksTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="sluser", email="sluser@example.com", password="pw12345678!")
+        self.moderator = User.objects.create_user(username="slmod", email="slmod@example.com", password="pw12345678!", role=User.Role.MODERATOR)
+
+    def test_get_returns_empty_dict_when_never_configured(self):
+        resp = self.client.get("/api/social-links/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data, {})
+
+    def test_anonymous_cannot_set_links(self):
+        resp = self.client.put("/api/social-links/", {"facebook": "https://facebook.com/wemix"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_regular_user_cannot_set_links(self):
+        self.client.force_authenticate(self.user)
+        resp = self.client.put("/api/social-links/", {"facebook": "https://facebook.com/wemix"}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_moderator_can_set_links_and_public_get_reflects_it(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.put("/api/social-links/", {
+            "facebook": "https://facebook.com/wemix", "x": "https://x.com/wemix",
+        }, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        public_resp = self.client.get("/api/social-links/")
+        self.assertEqual(public_resp.data["facebook"], "https://facebook.com/wemix")
+        self.assertEqual(public_resp.data["x"], "https://x.com/wemix")
+
+    def test_unknown_platform_keys_are_silently_dropped(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.put("/api/social-links/", {"myspace": "https://myspace.com/wemix"}, format="json")
+        self.assertNotIn("myspace", resp.data)
+
+    def test_blank_values_are_dropped_not_stored_as_empty_strings(self):
+        self.client.force_authenticate(self.moderator)
+        resp = self.client.put("/api/social-links/", {"facebook": "https://facebook.com/wemix", "instagram": "   "}, format="json")
+        self.assertNotIn("instagram", resp.data)
+
+    def test_second_put_fully_replaces_the_links(self):
+        self.client.force_authenticate(self.moderator)
+        self.client.put("/api/social-links/", {"facebook": "https://facebook.com/wemix"}, format="json")
+        resp = self.client.put("/api/social-links/", {"x": "https://x.com/wemix"}, format="json")
+        self.assertNotIn("facebook", resp.data)
+        self.assertEqual(resp.data["x"], "https://x.com/wemix")

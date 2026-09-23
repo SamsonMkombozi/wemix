@@ -44,6 +44,7 @@ class ModeratorOrderSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     listing_slug = serializers.CharField(source="listing.slug", read_only=True)
+    seller_username = serializers.CharField(source="listing.seller.username", read_only=True)
     transactions = SelcomTransactionSerializer(many=True, read_only=True)
     has_review = serializers.SerializerMethodField()
 
@@ -54,6 +55,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "listing",
             "listing_title",
             "listing_slug",
+            "seller_username",
             "amount",
             "currency",
             "status",

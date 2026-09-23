@@ -98,12 +98,176 @@ function closeModal() {
   if (overlay) overlay.classList.add('hidden');
 }
 
-/* Generic sub-tab bar helper: tabs = [{key, label, render}], renders into subContentEl */
-function renderSubTabs(container, tabs, defaultKey) {
+/* Saved-filter persistence: remembers filter input values per view across
+   reloads via localStorage, restored before that view's first load(). */
+const FILTER_STORAGE_PREFIX = 'mod_filters_';
+function restoreFilters(key, ids) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE_PREFIX + key) || '{}');
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && saved[id] != null) el.value = saved[id];
+    });
+  } catch (e) { /* corrupt/blocked storage -- ignore, filters just won't persist */ }
+}
+function wireFilterPersistence(key, ids) {
+  const save = () => {
+    const data = {};
+    ids.forEach((id) => { const el = document.getElementById(id); if (el) data[id] = el.value; });
+    try { localStorage.setItem(FILTER_STORAGE_PREFIX + key, JSON.stringify(data)); } catch (e) { /* quota/blocked -- ignore */ }
+  };
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', save);
+  });
+}
+
+/* Persistent sidebar navigation (replacing the old flat .dash-tabs row) --
+   reuses the exact .dash-nav / .dash-sidebar / .dash-bottom-nav / .dash-drawer
+   CSS built for dashboard.html's grouped IA, so no new styling is needed here.
+   MOD_NAV_GROUPS/MOD_SEARCH_INDEX are populated in init() once the signed-in
+   staff member's role is known (Treasury is admin-only). */
+let MOD_NAV_GROUPS = {};
+let MOD_SEARCH_INDEX = [];
+let currentModTab = 'verifications';
+const MOD_GROUP_ICONS = {
+  queues: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>',
+  content: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/>',
+  finance: '<circle cx="12" cy="12" r="10"/><path d="M12 6v12M15 9.5c0-1.4-1.3-2.5-3-2.5s-3 1.1-3 2.5 1.3 2.2 3 2.5c1.7.3 3 1.1 3 2.5s-1.3 2.5-3 2.5-3-1.1-3-2.5"/>',
+  admin: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/>',
+};
+const MOD_TAB_LABELS = { verifications: 'Verifications', users: 'Users', listings: 'Listings', transactions: 'Transactions', treasury: 'Treasury', settings: 'Settings', reports: 'Reports' };
+
+function modGroupForTab(tab) {
+  return Object.keys(MOD_NAV_GROUPS).find((g) => MOD_NAV_GROUPS[g].tabs.some(([t]) => t === tab));
+}
+function modNavLinkHtml(t, label) {
+  return `<a class="dash-nav-link" data-tab="${t}">${escapeHtml(label)}</a>`;
+}
+function updateModBreadcrumb(tabLabel, subLabel) {
+  const el = document.getElementById('mod-breadcrumb');
+  if (!el) return;
+  el.textContent = subLabel ? `Moderation / ${tabLabel} / ${subLabel}` : `Moderation / ${tabLabel}`;
+}
+function setActiveModTab(tab) {
+  currentModTab = tab;
+  document.querySelectorAll('.dash-nav-link').forEach((l) => l.classList.toggle('active', l.dataset.tab === tab));
+  const activeGroup = modGroupForTab(tab);
+  document.querySelectorAll('#mod-bottom-nav .dash-bottom-nav-item').forEach((b) => b.classList.toggle('active', b.dataset.group === activeGroup));
+  updateModBreadcrumb(MOD_TAB_LABELS[tab] || tab);
+}
+function closeModDrawer() {
+  document.getElementById('mod-drawer-overlay')?.classList.remove('open');
+}
+function openModDrawer(groupKey) {
+  const group = MOD_NAV_GROUPS[groupKey];
+  const drawer = document.getElementById('mod-drawer');
+  drawer.innerHTML = `
+    <div class="dash-drawer-handle"></div>
+    <div class="dash-drawer-title">${escapeHtml(group.label)}</div>
+    ${group.tabs.map(([t, label]) => modNavLinkHtml(t, label)).join('')}
+  `;
+  drawer.querySelectorAll('.dash-nav-link').forEach((link) => {
+    link.addEventListener('click', () => selectModTab(link.dataset.tab));
+  });
+  setActiveModTab(currentModTab);
+  document.getElementById('mod-drawer-overlay').classList.add('open');
+}
+function selectModTab(tab, initialSub) {
+  setActiveModTab(tab);
+  renderTab(tab, initialSub);
+  closeModDrawer();
+}
+
+function buildModSearchIndex(isAdmin) {
+  const idx = [
+    { tab: 'verifications', sub: 'kyc', label: 'Identity (KYC)' },
+    { tab: 'verifications', sub: 'listings', label: 'Listings & AI score' },
+    { tab: 'verifications', sub: 'payout', label: 'Payout accounts (verification)' },
+    { tab: 'verifications', sub: 'corporate', label: 'Corporate (KYB)' },
+    { tab: 'users', sub: undefined, label: 'Users' },
+    { tab: 'listings', sub: 'all', label: 'All listings' },
+    { tab: 'listings', sub: 'flags', label: 'Circumvention flags' },
+    { tab: 'transactions', sub: 'sales', label: 'Sales' },
+    { tab: 'transactions', sub: 'refunds', label: 'Refunds' },
+    { tab: 'transactions', sub: 'withdrawals', label: 'Withdrawals' },
+    { tab: 'transactions', sub: 'subscriptions', label: 'Subscriptions' },
+    { tab: 'transactions', sub: 'payout', label: 'Payout accounts' },
+    { tab: 'transactions', sub: 'wallet', label: 'Platform wallet & commissions' },
+    { tab: 'settings', sub: undefined, label: 'Settings' },
+    { tab: 'reports', sub: 'reports', label: 'User reports' },
+    { tab: 'reports', sub: 'queue', label: 'Unified queue' },
+    { tab: 'reports', sub: 'support', label: 'Support tickets' },
+    { tab: 'reports', sub: 'financials', label: 'Financials' },
+  ];
+  if (isAdmin) idx.push({ tab: 'treasury', sub: undefined, label: 'Treasury' });
+  return idx;
+}
+
+function wireModSidebarSearch() {
+  const searchInput = document.getElementById('mod-search-input');
+  const searchResults = document.getElementById('mod-search-results');
+  const closeResults = () => { searchResults.innerHTML = ''; searchResults.classList.add('hidden'); };
+  const renderResults = (q) => {
+    if (!q) return closeResults();
+    const matches = MOD_SEARCH_INDEX.filter((e) => e.label.toLowerCase().includes(q.toLowerCase()));
+    if (!matches.length) {
+      searchResults.innerHTML = `<p class="text-muted" style="font-size:0.8rem; margin:var(--space-2) 0 0;">No matches</p>`;
+      searchResults.classList.remove('hidden');
+      return;
+    }
+    searchResults.innerHTML = matches.map((m) => `
+      <button type="button" class="mod-search-result-item" data-tab="${m.tab}" data-sub="${m.sub || ''}"
+        style="display:block; width:100%; text-align:left; background:none; border:none; padding: var(--space-2) var(--space-2); font-size:0.82rem; cursor:pointer; border-radius:6px; color:var(--color-text);">
+        ${escapeHtml(m.label)}
+      </button>`).join('');
+    searchResults.classList.remove('hidden');
+    searchResults.querySelectorAll('.mod-search-result-item').forEach((btn) => {
+      btn.addEventListener('mouseenter', () => { btn.style.background = '#f4f0e4'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+      btn.addEventListener('click', () => {
+        selectModTab(btn.dataset.tab, btn.dataset.sub || undefined);
+        searchInput.value = '';
+        closeResults();
+      });
+    });
+  };
+  searchInput.addEventListener('input', () => renderResults(searchInput.value.trim()));
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { searchInput.value = ''; closeResults(); searchInput.blur(); } });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#mod-search-input') && !e.target.closest('#mod-search-results')) closeResults();
+  });
+}
+
+/* Keyboard shortcuts: "/" jumps to the sidebar search, "?" shows a help
+   dialog listing them, Escape (existing handler below) closes dialogs. */
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  const isEditable = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+  if (isEditable) return;
+  if (e.key === '/') {
+    e.preventDefault();
+    document.getElementById('mod-search-input')?.focus();
+  } else if (e.key === '?') {
+    e.preventDefault();
+    openModal('Keyboard shortcuts', `
+      <div style="font-size:0.88rem; line-height:2;">
+        <p><strong>/</strong> &mdash; focus the sidebar search</p>
+        <p><strong>Esc</strong> &mdash; close a dialog or the search results</p>
+        <p><strong>?</strong> &mdash; show this help</p>
+      </div>
+    `);
+  }
+});
+
+/* Generic sub-tab bar helper: tabs = [{key, label, render}], renders into subContentEl.
+   onActivate (optional) is called with the active tab's label, for breadcrumb updates. */
+function renderSubTabs(container, tabs, defaultKey, onActivate) {
+  const startKey = tabs.some((t) => t.key === defaultKey) ? defaultKey : tabs[0].key;
   const barId = `subtabs-${Math.random().toString(36).slice(2, 8)}`;
   container.innerHTML = `
     <div class="sub-tabs" id="${barId}">
-      ${tabs.map((t) => `<button class="sub-tab ${t.key === defaultKey ? 'active' : ''}" data-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
+      ${tabs.map((t) => `<button class="sub-tab ${t.key === startKey ? 'active' : ''}" data-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join('')}
     </div>
     <div class="sub-content"></div>
   `;
@@ -115,12 +279,13 @@ function renderSubTabs(container, tabs, defaultKey) {
     subContent.innerHTML = `<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>`;
     const tab = tabs.find((t) => t.key === key);
     if (tab) tab.render(subContent);
+    if (onActivate) onActivate(tab ? tab.label : key);
   };
 
   bar.querySelectorAll('.sub-tab').forEach((btn) => {
     btn.addEventListener('click', () => activate(btn.dataset.subtab));
   });
-  activate(defaultKey);
+  activate(startKey);
 }
 
 async function init() {
@@ -136,49 +301,91 @@ async function init() {
     return;
   }
   CURRENT_USER = me;
+  const isAdmin = ADMIN_ROLES.includes(me.role);
+
+  MOD_NAV_GROUPS = {
+    queues: { label: 'Queues', tabs: [['verifications', 'Verifications'], ['reports', 'Reports']] },
+    content: { label: 'Content', tabs: [['listings', 'Listings']] },
+    finance: { label: 'Finance', tabs: isAdmin ? [['transactions', 'Transactions'], ['treasury', 'Treasury']] : [['transactions', 'Transactions']] },
+    admin: { label: 'Admin', tabs: [['users', 'Users'], ['settings', 'Settings']] },
+  };
+  MOD_SEARCH_INDEX = buildModSearchIndex(isAdmin);
 
   gate.innerHTML = `
     <h1 style="margin-bottom:var(--space-1);">Moderation</h1>
     <p class="text-muted" style="margin-top:0;">Signed in as ${escapeHtml(me.username)} (${escapeHtml(me.role)})</p>
-    <div class="dash-tabs">
-      <div class="dash-tab active" data-tab="verifications">Verifications</div>
-      <div class="dash-tab" data-tab="users">Users</div>
-      <div class="dash-tab" data-tab="listings">Listings</div>
-      <div class="dash-tab" data-tab="transactions">Transactions</div>
-      ${ADMIN_ROLES.includes(me.role) ? `<div class="dash-tab" data-tab="treasury">Treasury</div>` : ''}
-      <div class="dash-tab" data-tab="settings">Settings</div>
-      <div class="dash-tab" data-tab="reports">Reports</div>
+    <div class="dash-grid">
+      <aside class="dash-sidebar">
+        <div class="card" style="padding:var(--space-3); position:relative;">
+          <input type="text" id="mod-search-input" placeholder="Search sections&hellip; (press /)" style="width:100%; padding: var(--space-2) var(--space-3); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; box-sizing:border-box;">
+          <div id="mod-search-results" class="hidden" style="position:absolute; left:var(--space-3); right:var(--space-3); top:100%; margin-top: var(--space-1); background:#fff; border:1px solid var(--color-border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.08); padding: var(--space-2); z-index:20;"></div>
+        </div>
+        <nav class="dash-nav" id="mod-nav">
+          ${Object.entries(MOD_NAV_GROUPS).map(([key, g]) => `
+            <details class="dash-nav-group" open data-group="${key}">
+              <summary>${escapeHtml(g.label)}</summary>
+              ${g.tabs.map(([t, label]) => modNavLinkHtml(t, label)).join('')}
+            </details>
+          `).join('')}
+        </nav>
+      </aside>
+      <section>
+        <div id="mod-breadcrumb" class="text-muted" style="font-size:0.8rem; margin-bottom:var(--space-3); text-transform:uppercase; letter-spacing:0.03em;"></div>
+        <div id="tab-content"></div>
+      </section>
     </div>
-    <div id="tab-content"></div>
+
+    <div class="dash-bottom-nav" id="mod-bottom-nav">
+      ${Object.entries(MOD_NAV_GROUPS).map(([key, g]) => `
+        <button class="dash-bottom-nav-item" data-group="${key}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${MOD_GROUP_ICONS[key]}</svg>
+          <span>${escapeHtml(g.label)}</span>
+        </button>
+      `).join('')}
+    </div>
+    <div class="dash-drawer-overlay" id="mod-drawer-overlay">
+      <div class="dash-drawer" id="mod-drawer"></div>
+    </div>
   `;
+  document.body.classList.add('has-dash-bottom-nav');
 
-  document.querySelectorAll('.dash-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.dash-tab').forEach((t) => t.classList.remove('active'));
-      tab.classList.add('active');
-      renderTab(tab.dataset.tab);
-    });
+  document.getElementById('mod-drawer-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'mod-drawer-overlay') closeModDrawer();
   });
+  document.querySelectorAll('#mod-bottom-nav .dash-bottom-nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => openModDrawer(btn.dataset.group));
+  });
+  document.querySelectorAll('#mod-nav .dash-nav-link').forEach((link) => {
+    link.addEventListener('click', () => selectModTab(link.dataset.tab));
+  });
+  wireModSidebarSearch();
 
-  renderTab('verifications');
+  // Deep-link support, mirroring dashboard.html's ?tab= handling.
+  const requestedModTab = new URLSearchParams(window.location.search).get('tab');
+  const validModTabs = new Set(Object.values(MOD_NAV_GROUPS).flatMap((g) => g.tabs.map(([t]) => t)));
+  const initialModTab = validModTabs.has(requestedModTab) ? requestedModTab : 'verifications';
+  document.querySelector(`#mod-nav details[data-group="${modGroupForTab(initialModTab)}"]`)?.setAttribute('open', '');
+  setActiveModTab(initialModTab);
+  renderTab(initialModTab);
 }
 
-function renderTab(tab) {
+function renderTab(tab, initialSub) {
   const content = document.getElementById('tab-content');
+  const onSub = (subLabel) => updateModBreadcrumb(MOD_TAB_LABELS[tab] || tab, subLabel);
   if (tab === 'verifications') {
     return renderSubTabs(content, [
       { key: 'kyc', label: 'Identity (KYC)', render: renderVerificationQueue },
       { key: 'listings', label: 'Listings & AI score', render: renderListingVerificationQueue },
       { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
       { key: 'corporate', label: 'Corporate (KYB)', render: renderCorporateQueue },
-    ], 'kyc');
+    ], initialSub || 'kyc', onSub);
   }
-  if (tab === 'users') return renderUsersTab(content);
+  if (tab === 'users') { updateModBreadcrumb(MOD_TAB_LABELS[tab]); return renderUsersTab(content); }
   if (tab === 'listings') {
     return renderSubTabs(content, [
       { key: 'all', label: 'All listings', render: renderAllListings },
       { key: 'flags', label: 'Circumvention flags', render: renderFlagsQueue },
-    ], 'all');
+    ], initialSub || 'all', onSub);
   }
   if (tab === 'transactions') {
     return renderSubTabs(content, [
@@ -188,17 +395,17 @@ function renderTab(tab) {
       { key: 'subscriptions', label: 'Subscriptions', render: renderSubscriptionsTab },
       { key: 'payout', label: 'Payout accounts', render: renderPayoutAccountsQueue },
       { key: 'wallet', label: 'Platform wallet & commissions', render: renderPlatformWallet },
-    ], 'sales');
+    ], initialSub || 'sales', onSub);
   }
-  if (tab === 'treasury') return renderTreasuryTab(content);
-  if (tab === 'settings') return renderSettingsTab(content);
+  if (tab === 'treasury') { updateModBreadcrumb(MOD_TAB_LABELS[tab]); return renderTreasuryTab(content); }
+  if (tab === 'settings') { updateModBreadcrumb(MOD_TAB_LABELS[tab]); return renderSettingsTab(content); }
   if (tab === 'reports') {
     return renderSubTabs(content, [
       { key: 'reports', label: 'User reports', render: renderReportsQueue },
       { key: 'queue', label: 'Unified queue', render: renderUnifiedQueue },
       { key: 'support', label: 'Support tickets', render: renderSupportQueue },
       { key: 'financials', label: 'Financials', render: renderFinancialsTab },
-    ], 'reports');
+    ], initialSub || 'reports', onSub);
   }
 }
 
@@ -215,19 +422,19 @@ async function renderVerificationQueue(content) {
       return;
     }
     content.innerHTML = results.map((v) => `
-      <div class="card" style="padding:var(--space-5); margin-bottom:14px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom: var(--space-4);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
-            <h3 style="margin:0 0 4px 0;">${escapeHtml((v.id_type || '').toUpperCase())} submission</h3>
-            <p class="text-muted" style="margin:0 0 10px 0; font-size:0.85rem;">Submitted ${timeAgo(v.created_at)}</p>
-            <div style="display:flex; gap:10px; margin-bottom:var(--space-3);">
+            <h3 style="margin: 0 0 var(--space-1) 0;">${escapeHtml((v.id_type || '').toUpperCase())} submission</h3>
+            <p class="text-muted" style="margin: 0 0 var(--space-3) 0; font-size:0.85rem;">Submitted ${timeAgo(v.created_at)}</p>
+            <div style="display:flex; gap: var(--space-3); margin-bottom:var(--space-3);">
               <a href="${v.front_image}" target="_blank"><img src="${v.front_image}" alt="ID front" style="width:120px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
               <a href="${v.selfie_image}" target="_blank"><img src="${v.selfie_image}" alt="Selfie" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);"></a>
             </div>
-            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR name:</strong> ${escapeHtml(v.ocr_full_name || '—')}</p>
-            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR ID number:</strong> ${escapeHtml(v.ocr_id_number || '—')}</p>
-            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR DOB:</strong> ${escapeHtml(v.ocr_date_of_birth || '—')}</p>
-            <p style="font-size:0.85rem; margin:2px 0;"><strong>OCR confidence:</strong> ${v.ocr_confidence != null ? Math.round(v.ocr_confidence * 100) + '%' : '—'}</p>
+            <p style="font-size:0.85rem; margin: var(--space-1) 0;"><strong>OCR name:</strong> ${escapeHtml(v.ocr_full_name || '—')}</p>
+            <p style="font-size:0.85rem; margin: var(--space-1) 0;"><strong>OCR ID number:</strong> ${escapeHtml(v.ocr_id_number || '—')}</p>
+            <p style="font-size:0.85rem; margin: var(--space-1) 0;"><strong>OCR DOB:</strong> ${escapeHtml(v.ocr_date_of_birth || '—')}</p>
+            <p style="font-size:0.85rem; margin: var(--space-1) 0;"><strong>OCR confidence:</strong> ${v.ocr_confidence != null ? Math.round(v.ocr_confidence * 100) + '%' : '—'}</p>
           </div>
           <div style="min-width:220px;">
             <div id="kyc-alert-${v.id}"></div>
@@ -270,7 +477,7 @@ function renderListingFullDetails(listing) {
   };
 
   const mediaHtml = (listing.media || []).length
-    ? `<div style="display:flex; gap:10px; flex-wrap:wrap; margin:10px 0;">
+    ? `<div style="display:flex; gap: var(--space-3); flex-wrap:wrap; margin: var(--space-3) 0;">
         ${listing.media.map((m) => {
           const src = m.file || m.preview_file;
           const filename = (src || '').split('/').pop();
@@ -281,7 +488,7 @@ function renderListingFullDetails(listing) {
             previewHtml = `
               <a href="${src}" target="_blank" rel="noopener" style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:100px; height:70px; border-radius:6px; border:1px solid var(--color-border); background:#f6f3ea; text-decoration:none; color:var(--color-text);">
                 <span style="font-size:1.4rem;">📄</span>
-                <span class="text-muted" style="font-size:0.65rem; padding:0 4px; word-break:break-all;">${escapeHtml(filename)}</span>
+                <span class="text-muted" style="font-size:0.65rem; padding: 0 var(--space-1); word-break:break-all;">${escapeHtml(filename)}</span>
               </a>`;
           } else {
             previewHtml = `<img src="${m.preview_file || m.file}" alt="" class="mod-media-zoom" data-full="${src}" style="width:100px;height:70px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:zoom-in;">`;
@@ -294,9 +501,9 @@ function renderListingFullDetails(listing) {
           return `
           <div style="text-align:center; max-width:110px;">
             ${previewHtml}
-            <div class="text-muted" style="font-size:0.65rem; margin-top:2px; text-transform:uppercase; letter-spacing:0.03em;">${escapeHtml(m.media_type)}${m.is_cover ? ' &middot; cover' : ''}</div>
+            <div class="text-muted" style="font-size:0.65rem; margin-top: var(--space-1); text-transform:uppercase; letter-spacing:0.03em;">${escapeHtml(m.media_type)}${m.is_cover ? ' &middot; cover' : ''}</div>
             ${m.media_type !== 'image' ? `<a href="${src}" download class="text-muted" style="font-size:0.7rem;">Download</a>` : ''}
-            ${(m.analysis_results || []).map((a) => `<div class="text-muted" style="font-size:0.7rem; margin-top:2px;">${a.flagged ? '<span style="color:var(--color-danger);">⚠ flagged</span>' : 'clean'} &middot; manip. ${a.manipulation_score}</div>`).join('')}
+            ${(m.analysis_results || []).map((a) => `<div class="text-muted" style="font-size:0.7rem; margin-top: var(--space-1);">${a.flagged ? '<span style="color:var(--color-danger);">⚠ flagged</span>' : 'clean'} &middot; manip. ${a.manipulation_score}</div>`).join('')}
             ${wireBits.length ? `<div class="text-muted" style="font-size:0.62rem; margin-top:var(--space-1); line-height:1.3;">${wireBits.join('<br>')}</div>` : ''}
           </div>
         `;
@@ -309,14 +516,14 @@ function renderListingFullDetails(listing) {
     : '<span class="text-muted">none</span>';
 
   return `
-    <p style="font-size:0.8rem; display:flex; align-items:center; gap:8px;">
+    <p style="font-size:0.8rem; display:flex; align-items:center; gap: var(--space-2);">
       <strong>Seller:</strong> ${escapeHtml(listing.seller_username)} ${listing.seller_verified_badge ? '<span style="color:var(--color-gold-dark);">&#10003; verified</span>' : ''}
-      <button class="btn btn-outline btn-sm toggle-verified-badge-btn" data-user-id="${listing.seller}" style="padding:2px 8px; font-size:0.75rem;">${listing.seller_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
+      <button class="btn btn-outline btn-sm toggle-verified-badge-btn" data-user-id="${listing.seller}" style="padding: var(--space-1) var(--space-2); font-size:0.75rem;">${listing.seller_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
     </p>
     <p style="font-size:0.8rem;"><strong>Location:</strong> ${escapeHtml(listing.location || 'n/a')} &middot; <strong>Tags:</strong> ${tagsHtml}</p>
     <p style="font-size:0.8rem;"><strong>License:</strong> ${escapeHtml((listing.license_type || 'standard').replace(/_/g, ' '))} &middot; <strong>Territory:</strong> ${escapeHtml(listing.license_territory || 'Worldwide')}</p>
     <p style="font-size:0.85rem; font-weight:600; margin-bottom:var(--space-1);">Full story body:</p>
-    <div class="card" style="padding:14px; background:#f6f3ea; margin-bottom:14px;">
+    <div class="card" style="padding: var(--space-4); background:#f6f3ea; margin-bottom: var(--space-4);">
       <p style="white-space:pre-wrap; font-size:0.85rem; margin:0;">${escapeHtml(listing.body || '(empty)')}</p>
     </div>
     <p style="font-size:0.85rem; font-weight:600; margin-bottom:var(--space-1);">Attached media:</p>
@@ -335,16 +542,16 @@ function renderListingFullDetails(listing) {
       </div>
       ${ai.human_notes ? `<p class="text-muted" style="font-size:0.8rem;"><strong>Prior human notes:</strong> ${escapeHtml(ai.human_notes)}</p>` : ''}
     ` : '<p class="text-muted" style="font-size:0.85rem;">No AI verification result recorded.</p>'}
-    <p style="font-size:0.85rem; font-weight:600; margin:14px 0 4px 0;">Corrections &amp; retractions:</p>
+    <p style="font-size:0.85rem; font-weight:600; margin: var(--space-4) 0 var(--space-1) 0;">Corrections &amp; retractions:</p>
     ${(listing.corrections || []).length ? listing.corrections.map((c) => `
-      <div class="card" style="padding:10px 14px; margin-bottom:var(--space-2); ${c.is_retraction ? 'border-color:var(--color-danger);' : ''}">
+      <div class="card" style="padding: var(--space-3) var(--space-4); margin-bottom:var(--space-2); ${c.is_retraction ? 'border-color:var(--color-danger);' : ''}">
         <p style="margin:0; font-size:0.82rem;">${c.is_retraction ? '<strong style="color:var(--color-danger);">RETRACTION</strong>' : '<strong>Correction</strong>'} <span class="text-muted">&middot; ${escapeHtml(c.created_by_username || 'staff')} &middot; ${timeAgo(c.created_at)}</span></p>
-        <p style="margin:4px 0 0 0; font-size:0.85rem;">${escapeHtml(c.text)}</p>
+        <p style="margin: var(--space-1) 0 0 0; font-size:0.85rem;">${escapeHtml(c.text)}</p>
       </div>
     `).join('') : '<p class="text-muted" style="font-size:0.85rem;">None posted.</p>'}
     <div style="margin-top:var(--space-2);">
       <textarea class="correction-text" placeholder="Correction or retraction text&hellip;" style="width:100%; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
-      <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; margin:6px 0;">
+      <label style="display:flex; align-items:center; gap: var(--space-2); font-size:0.8rem; margin: var(--space-2) 0;">
         <input type="checkbox" class="correction-is-retraction" style="width:auto;"> This is a retraction (materially wrong, not just an amendment)
       </label>
       <div id="correction-alert-${listing.slug}"></div>
@@ -401,7 +608,7 @@ function wireMediaZoom(panel) {
 
 function deletePermanentlyHtml(slug) {
   return `
-    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--color-danger);">
+    <div style="margin-top: var(--space-3); padding-top: var(--space-3); border-top:1px dashed var(--color-danger);">
       <div id="delete-perm-alert-${slug}"></div>
       <button class="btn btn-outline btn-sm mod-delete-permanently" data-slug="${slug}" style="border-color:var(--color-danger); color:var(--color-danger);">Delete Permanently</button>
     </div>
@@ -440,8 +647,8 @@ async function renderListingVerificationQueue(content) {
       return;
     }
     const bulkBar = `
-      <div class="card" style="padding:10px 16px; margin-bottom:var(--space-3); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+      <div class="card" style="padding: var(--space-3) var(--space-4); margin-bottom:var(--space-3); display:flex; align-items:center; gap: var(--space-3); flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap: var(--space-2); font-size:0.85rem;">
           <input type="checkbox" id="listmod-select-all" style="width:auto;"> Select all
         </label>
         <span class="text-muted" style="font-size:0.82rem;" id="listmod-selected-count">0 selected</span>
@@ -453,17 +660,17 @@ async function renderListingVerificationQueue(content) {
     content.innerHTML = bulkBar + results.map((l) => {
       const scoreColor = l.ai_score == null ? 'var(--color-text-muted)' : (l.ai_score >= 70 ? 'var(--color-success)' : (l.ai_score >= 40 ? 'var(--color-gold-dark)' : 'var(--color-danger)'));
       return `
-      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
+      <div class="card" style="padding: var(--space-5) var(--space-5); margin-bottom:var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
-            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+            <div class="flex-between" style="justify-content:flex-start; gap: var(--space-3);">
               <input type="checkbox" class="listmod-select" data-slug="${l.slug}" style="width:auto;">
               <strong>${escapeHtml(l.title)}</strong>
               ${pillFor(l.verification_status, verificationMap)}
             </div>
-            <p class="text-muted" style="margin:6px 0; font-size:0.85rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.news_type || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)}</p>
-            <p style="margin:6px 0; font-size:0.85rem;">${escapeHtml(l.description)}</p>
-            <p style="margin:4px 0; font-size:0.85rem;">
+            <p class="text-muted" style="margin: var(--space-2) 0; font-size:0.85rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.news_type || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)}</p>
+            <p style="margin: var(--space-2) 0; font-size:0.85rem;">${escapeHtml(l.description)}</p>
+            <p style="margin: var(--space-1) 0; font-size:0.85rem;">
               <strong>AI authenticity score:</strong>
               <span style="color:${scoreColor}; font-weight:700;">${l.ai_score != null ? l.ai_score : 'n/a'}</span>
               <span class="text-muted">(higher = more likely genuine; lower = more likely fake news)</span>
@@ -476,7 +683,7 @@ async function renderListingVerificationQueue(content) {
           <div style="min-width:200px;">
             <div id="listmod-alert-${l.slug}"></div>
             <textarea class="listmod-notes" data-slug="${l.slug}" placeholder="Notes (optional)" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:50px;"></textarea>
-            <button class="btn btn-sm btn-block listmod-approve" data-slug="${l.slug}" style="margin-bottom:6px;">Approve &amp; publish</button>
+            <button class="btn btn-sm btn-block listmod-approve" data-slug="${l.slug}" style="margin-bottom: var(--space-2);">Approve &amp; publish</button>
             <button class="btn btn-outline btn-sm btn-block listmod-reject" data-slug="${l.slug}">Reject</button>
           </div>
         </div>
@@ -585,20 +792,20 @@ async function renderPayoutAccountsQueue(content) {
       return;
     }
     content.innerHTML = results.map((a) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(a.account_name)}</strong>
             ${a.name_match_score != null ? (a.name_match_score < 70
               ? `<span class="pill pill-rejected" title="Fuzzy match against the user's verified KYC name">&#9888; name match ${a.name_match_score}%</span>`
               : `<span class="pill pill-verified" title="Fuzzy match against the user's verified KYC name">name match ${a.name_match_score}%</span>`) : ''}
-            <p style="margin:4px 0; font-size:0.85rem;">${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</p>
+            <p style="margin: var(--space-1) 0; font-size:0.85rem;">${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${escapeHtml(a.account_type.replace('_', ' '))} &middot; ${timeAgo(a.created_at)}</p>
           </div>
           <div style="min-width:200px;">
             <div id="payout-mod-alert-${a.id}"></div>
-            <button class="btn btn-sm btn-block payout-mod-verify" data-id="${a.id}" style="margin-bottom:6px;">Verify</button>
-            <input type="text" class="payout-mod-reason" data-id="${a.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-sm btn-block payout-mod-verify" data-id="${a.id}" style="margin-bottom: var(--space-2);">Verify</button>
+            <input type="text" class="payout-mod-reason" data-id="${a.id}" placeholder="Rejection reason" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block payout-mod-reject" data-id="${a.id}">Reject</button>
           </div>
         </div>
@@ -637,11 +844,11 @@ async function renderCorporateQueue(content) {
       return;
     }
     content.innerHTML = results.map((c) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(c.company_name)}</strong> ${pillFor(c.status, kybMap)}
-            <p style="margin:6px 0; font-size:0.85rem;">
+            <p style="margin: var(--space-2) 0; font-size:0.85rem;">
               <a href="${c.business_license}" target="_blank">Business license</a> &middot;
               <a href="${c.company_registration}" target="_blank">Company registration</a>
               ${c.tax_document ? ` &middot; <a href="${c.tax_document}" target="_blank">Tax document</a>` : ''}
@@ -650,8 +857,8 @@ async function renderCorporateQueue(content) {
           </div>
           <div style="min-width:200px;">
             <div id="corp-mod-alert-${c.id}"></div>
-            <button class="btn btn-sm btn-block corp-mod-verify" data-id="${c.id}" style="margin-bottom:6px;">Verify</button>
-            <input type="text" class="corp-mod-reason" data-id="${c.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-sm btn-block corp-mod-verify" data-id="${c.id}" style="margin-bottom: var(--space-2);">Verify</button>
+            <input type="text" class="corp-mod-reason" data-id="${c.id}" placeholder="Rejection reason" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block corp-mod-reject" data-id="${c.id}">Reject</button>
           </div>
         </div>
@@ -689,9 +896,9 @@ async function renderUsersTab(content) {
 
   content.innerHTML = `
     <div class="flex-between" style="margin-bottom:var(--space-4); align-items:flex-start;">
-      <div class="field-row" style="flex:1;">
-        <input type="text" id="user-search" placeholder="Search username, email, organization&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
-        <select id="user-role-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+      <div class="filters-bar" style="flex:1;">
+        <input type="text" id="user-search" placeholder="Search username, email, organization&hellip;" style="flex:2;">
+        <select id="user-role-filter">
           <option value="">All roles</option>
           <option value="buyer">Buyer</option>
           <option value="seller">Seller</option>
@@ -700,7 +907,7 @@ async function renderUsersTab(content) {
           <option value="moderator">Moderator</option>
           <option value="admin">Admin</option>
         </select>
-        <select id="user-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+        <select id="user-status-filter">
           <option value="">All statuses</option>
           <option value="active">Active</option>
           <option value="suspended">Suspended</option>
@@ -724,7 +931,7 @@ async function renderUsersTab(content) {
       }
       createArea.dataset.open = '1';
       createArea.innerHTML = `
-        <div class="card" style="padding:18px; margin-bottom:var(--space-4); border-color:var(--color-gold);">
+        <div class="card" style="padding: var(--space-5); margin-bottom:var(--space-4); border-color:var(--color-gold);">
           <h4 style="margin-top:0;">Create a new user</h4>
           <div id="user-create-alert"></div>
           <div class="field-row">
@@ -822,6 +1029,8 @@ async function renderUsersTab(content) {
     }
   };
 
+  restoreFilters('users', ['user-search', 'user-role-filter', 'user-status-filter']);
+  wireFilterPersistence('users', ['user-search', 'user-role-filter', 'user-status-filter']);
   document.getElementById('user-search').addEventListener('input', debounce(loadList, 400));
   document.getElementById('user-role-filter').addEventListener('change', loadList);
   document.getElementById('user-status-filter').addEventListener('change', loadList);
@@ -849,7 +1058,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
   const isSelf = u.id === CURRENT_USER?.id;
 
   const editFormHtml = isAdmin && !isSelf ? `
-    <div class="hidden" id="user-edit-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+    <div class="hidden" id="user-edit-form" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);">
       <div id="user-edit-alert"></div>
       <div class="field-row">
         <div class="form-group"><label>First name</label><input type="text" id="ue-first" value="${escapeHtml(u.first_name || '')}"></div>
@@ -869,7 +1078,7 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       </div>
       <button class="btn btn-sm" id="user-edit-save">Save changes</button>
     </div>
-    <div class="hidden" id="user-password-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+    <div class="hidden" id="user-password-form" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);">
       <div id="user-password-alert"></div>
       <div class="form-group"><label>New password</label><input type="text" id="up-new-password" placeholder="They'll be notified this was changed"></div>
       <button class="btn btn-sm" id="user-password-save">Set password</button>
@@ -877,17 +1086,17 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
   ` : '';
 
   const statusButtons = [];
-  if (u.is_suspended) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unsuspend" style="margin-bottom:6px;">Lift suspension</button>`);
-  if (u.is_banned) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unban" style="margin-bottom:6px;">Lift ban</button>`);
-  if (u.is_deleted) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-reactivate" style="margin-bottom:6px;">Reactivate account</button>`);
+  if (u.is_suspended) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unsuspend" style="margin-bottom: var(--space-2);">Lift suspension</button>`);
+  if (u.is_banned) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-unban" style="margin-bottom: var(--space-2);">Lift ban</button>`);
+  if (u.is_deleted) statusButtons.push(`<button class="btn btn-outline btn-sm btn-block" id="user-reactivate" style="margin-bottom: var(--space-2);">Reactivate account</button>`);
 
   const initial = ((u.first_name || u.username || '?').trim().charAt(0) || '?').toUpperCase();
 
   body.innerHTML = `
-    <div style="display:flex; gap:14px; align-items:flex-start; margin-bottom:var(--space-4);">
+    <div style="display:flex; gap: var(--space-4); align-items:flex-start; margin-bottom:var(--space-4);">
       <div class="avatar-circle-lg" style="width:56px; height:56px; font-size:1.3rem;">${u.avatar ? `<img src="${u.avatar}" alt="">` : escapeHtml(initial)}</div>
       <div>
-        <p class="text-muted" style="margin:0 0 6px 0; font-size:0.85rem;">${escapeHtml(u.email)} &middot; joined ${timeAgo(u.date_joined)}</p>
+        <p class="text-muted" style="margin: 0 0 var(--space-2) 0; font-size:0.85rem;">${escapeHtml(u.email)} &middot; joined ${timeAgo(u.date_joined)}</p>
         <div class="user-card-tags">
           <span class="pill pill-draft">${escapeHtml((u.role || '').replace('_', ' '))}</span>
           ${u.is_banned ? '<span class="pill pill-rejected">banned</span>' : (u.is_suspended ? '<span class="pill pill-pending">suspended</span>' : (u.is_deleted ? '<span class="pill pill-draft">deactivated</span>' : '<span class="pill pill-verified">active</span>'))}
@@ -896,38 +1105,38 @@ function renderUserModalContent(u, isAdmin, refresh, onListChange) {
       </div>
     </div>
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:var(--space-4); font-size:0.85rem;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap: var(--space-3); margin-bottom:var(--space-4); font-size:0.85rem;">
       <div><strong>Trust score:</strong> ${u.trust_score}/100</div>
       <div><strong>KYC status:</strong> ${escapeHtml((u.id_verification_status || '').replace('_', ' '))}</div>
       <div><strong>Phone:</strong> ${escapeHtml(u.phone_number || 'n/a')}</div>
       <div><strong>Organization:</strong> ${escapeHtml(u.organization_name || 'n/a')}</div>
       ${u.is_suspended ? `<div><strong>Suspended until:</strong> ${u.suspended_until ? new Date(u.suspended_until).toLocaleDateString() : ''}</div>` : ''}
     </div>
-    ${u.bio ? `<p style="font-size:0.85rem; margin:0 0 16px 0;"><strong>Bio:</strong> ${escapeHtml(u.bio)}</p>` : ''}
+    ${u.bio ? `<p style="font-size:0.85rem; margin: 0 0 var(--space-4) 0;"><strong>Bio:</strong> ${escapeHtml(u.bio)}</p>` : ''}
 
     ${isSelf ? '<p class="text-muted" style="font-size:0.8rem;">This is your own account -- use your profile settings to edit it.</p>' : `
       <div id="user-mod-alert"></div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap: var(--space-3);">
         <div>
           <select id="user-mod-action" style="width:100%; margin-bottom:var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <option value="warning">Warning</option>
             <option value="temporary_suspension">Temporary suspension</option>
             <option value="permanent_ban">Permanent ban</option>
           </select>
-          <button class="btn btn-sm btn-block" id="user-mod-apply" style="margin-bottom:6px;">Apply action</button>
+          <button class="btn btn-sm btn-block" id="user-mod-apply" style="margin-bottom: var(--space-2);">Apply action</button>
           ${statusButtons.join('')}
         </div>
         <div>
-          <button class="btn btn-outline btn-sm btn-block" id="user-toggle-badge" style="margin-bottom:6px;">${u.is_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
-          <button class="btn btn-outline btn-sm btn-block" id="user-apikeys-toggle" style="margin-bottom:6px;">API keys</button>
-          ${!u.is_deleted ? `<button class="btn btn-outline btn-sm btn-block" id="user-force-deactivate" style="margin-bottom:6px; border-color:var(--color-danger); color:var(--color-danger);">Force deactivate</button>` : ''}
+          <button class="btn btn-outline btn-sm btn-block" id="user-toggle-badge" style="margin-bottom: var(--space-2);">${u.is_verified_badge ? 'Remove verified badge' : 'Grant verified badge'}</button>
+          <button class="btn btn-outline btn-sm btn-block" id="user-apikeys-toggle" style="margin-bottom: var(--space-2);">API keys</button>
+          ${!u.is_deleted ? `<button class="btn btn-outline btn-sm btn-block" id="user-force-deactivate" style="margin-bottom: var(--space-2); border-color:var(--color-danger); color:var(--color-danger);">Force deactivate</button>` : ''}
           ${isAdmin ? `
-            <button class="btn btn-outline btn-sm btn-block" id="user-edit-toggle" style="margin-bottom:6px;">Edit profile</button>
+            <button class="btn btn-outline btn-sm btn-block" id="user-edit-toggle" style="margin-bottom: var(--space-2);">Edit profile</button>
             <button class="btn btn-outline btn-sm btn-block" id="user-password-toggle">Set password</button>
           ` : ''}
         </div>
       </div>
-      <div class="hidden" id="user-apikeys-panel" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);"></div>
+      <div class="hidden" id="user-apikeys-panel" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);"></div>
       ${editFormHtml}
     `}
   `;
@@ -1088,9 +1297,9 @@ function debounce(fn, ms) {
 
 async function renderAllListings(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:var(--space-4);">
-      <input type="text" id="listing-search" placeholder="Search title/description&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
-      <select id="listing-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+    <div class="filters-bar" style="margin-bottom:var(--space-4);">
+      <input type="text" id="listing-search" placeholder="Search title/description&hellip;" style="flex:2;">
+      <select id="listing-status-filter">
         <option value="">All verification statuses</option>
         <option value="verified">Verified</option>
         <option value="partially_verified">Partially verified</option>
@@ -1122,15 +1331,15 @@ async function renderAllListings(content) {
         return;
       }
       listArea.innerHTML = results.map((l) => `
-        <div class="card" style="padding:14px 18px; margin-bottom:10px;">
+        <div class="card card-compact" style="margin-bottom: var(--space-3);">
           <div class="flex-between" style="align-items:flex-start;">
             <div>
-              <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <div class="flex-between" style="justify-content:flex-start; gap: var(--space-3);">
                 <strong>${escapeHtml(l.title)}</strong>
                 ${pillFor(l.verification_status, verificationMap)}
                 ${l.featured ? '<span class="pill pill-verified">Featured</span>' : ''}
               </div>
-              <p class="text-muted" style="margin:4px 0; font-size:0.82rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.status || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)} &middot; ai ${l.ai_score != null ? l.ai_score : 'n/a'}</p>
+              <p class="text-muted" style="margin: var(--space-1) 0; font-size:0.82rem;">${escapeHtml(l.seller_username)} &middot; ${escapeHtml((l.status || '').replace('_', ' '))} &middot; ${money(l.price, l.currency)} &middot; ai ${l.ai_score != null ? l.ai_score : 'n/a'}</p>
             </div>
             <div style="text-align:right;">
               <a href="listing.html?slug=${encodeURIComponent(l.slug)}" target="_blank" class="text-muted" style="font-size:0.8rem;">Open &rarr;</a><br>
@@ -1150,11 +1359,11 @@ async function renderAllListings(content) {
             const listing = await apiFetch(`/api/news/listings/${encodeURIComponent(slug)}/`);
             let html = renderListingFullDetails(listing);
             html += `
-              <div style="margin-top:var(--space-3); display:flex; gap:8px;">
+              <div style="margin-top:var(--space-3); display:flex; gap: var(--space-2);">
                 <textarea class="all-listing-notes" placeholder="Notes (optional)" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem; min-height:40px;"></textarea>
               </div>
               <div id="all-listing-mod-alert-${slug}" style="margin-top:var(--space-2);"></div>
-              <div style="margin-top:var(--space-2); display:flex; gap:8px;">
+              <div style="margin-top:var(--space-2); display:flex; gap: var(--space-2);">
                 <button class="btn btn-sm all-listing-approve" data-slug="${slug}">Approve &amp; publish</button>
                 <button class="btn btn-outline btn-sm all-listing-reject" data-slug="${slug}">Reject</button>
               </div>
@@ -1202,6 +1411,8 @@ async function renderAllListings(content) {
     }
   };
 
+  restoreFilters('listings', ['listing-search', 'listing-status-filter']);
+  wireFilterPersistence('listings', ['listing-search', 'listing-status-filter']);
   document.getElementById('listing-search').addEventListener('input', debounce(load, 400));
   document.getElementById('listing-status-filter').addEventListener('change', load);
   load();
@@ -1217,14 +1428,14 @@ async function renderFlagsQueue(content) {
       return;
     }
     content.innerHTML = results.map((f) => `
-      <div class="card" style="padding:18px 20px; margin-bottom:var(--space-3);">
+      <div class="card" style="padding: var(--space-5) var(--space-5); margin-bottom:var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
-            <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+            <div class="flex-between" style="justify-content:flex-start; gap: var(--space-3);">
               <strong>${escapeHtml(f.username)}</strong>
               ${pillFor(f.severity, severityMap)}
             </div>
-            <p style="margin:6px 0; font-size:0.88rem;">${escapeHtml((f.detected_pattern || '').replace(/_/g, ' '))}: <code>${escapeHtml(f.matched_text)}</code></p>
+            <p style="margin: var(--space-2) 0; font-size:0.88rem;">${escapeHtml((f.detected_pattern || '').replace(/_/g, ' '))}: <code>${escapeHtml(f.matched_text)}</code></p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">Confidence ${Math.round(f.confidence)}% &middot; ${timeAgo(f.created_at)}</p>
           </div>
           <div style="min-width:200px;">
@@ -1267,16 +1478,16 @@ async function renderFlagsQueue(content) {
 
 async function renderSalesTab(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:var(--space-4);">
-      <input type="text" id="sales-search" placeholder="Search buyer/seller/listing&hellip;" style="flex:2; padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
-      <select id="sales-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+    <div class="filters-bar" style="margin-bottom:var(--space-4);">
+      <input type="text" id="sales-search" placeholder="Search buyer/seller/listing&hellip;" style="flex:2;">
+      <select id="sales-status-filter">
         <option value="">All statuses</option>
         <option value="paid">Paid</option>
         <option value="pending_payment">Pending payment</option>
         <option value="failed">Failed</option>
         <option value="refunded">Refunded</option>
       </select>
-      <select id="sales-provider-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+      <select id="sales-provider-filter">
         <option value="">All providers</option>
         <option value="selcom">Selcom</option>
         <option value="nala">Nala/Rafiki</option>
@@ -1326,8 +1537,8 @@ async function renderSalesTab(content) {
 
 async function renderSubscriptionsTab(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:var(--space-4);">
-      <select id="subs-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+    <div class="filters-bar" style="margin-bottom:var(--space-4);">
+      <select id="subs-status-filter">
         <option value="">All statuses</option>
         <option value="pending_payment">Pending payment</option>
         <option value="active">Active</option>
@@ -1380,16 +1591,16 @@ async function renderRefundsQueue(content) {
       return;
     }
     content.innerHTML = results.map((r) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${money(r.amount)}</strong>
-            <p style="margin:4px 0; font-size:0.85rem;">${escapeHtml(r.reason)}</p>
+            <p style="margin: var(--space-1) 0; font-size:0.85rem;">${escapeHtml(r.reason)}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(r.created_at)}</p>
           </div>
           <div style="min-width:200px;">
             <div id="refund-alert-${r.id}"></div>
-            <button class="btn btn-sm btn-block refund-action" data-id="${r.id}" data-status="completed" style="margin-bottom:6px;">Approve &amp; refund now</button>
+            <button class="btn btn-sm btn-block refund-action" data-id="${r.id}" data-status="completed" style="margin-bottom: var(--space-2);">Approve &amp; refund now</button>
             <button class="btn btn-outline btn-sm btn-block refund-action" data-id="${r.id}" data-status="rejected">Reject</button>
           </div>
         </div>
@@ -1423,19 +1634,19 @@ async function renderWithdrawalsQueue(content) {
       return;
     }
     content.innerHTML = results.map((w) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(w.wallet_owner_username)}</strong> &middot; ${money(w.amount)}
             ${w.risk_flagged ? `<span class="pill pill-rejected" title="At/above the configured single-withdrawal risk threshold">&#9888; high value</span>` : ''}
-            <p class="text-muted" style="margin:4px 0; font-size:0.85rem;">${escapeHtml(w.destination_type.replace('_',' '))} &middot; ${escapeHtml(JSON.stringify(w.destination_details))}</p>
+            <p class="text-muted" style="margin: var(--space-1) 0; font-size:0.85rem;">${escapeHtml(w.destination_type.replace('_',' '))} &middot; ${escapeHtml(JSON.stringify(w.destination_details))}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${timeAgo(w.created_at)}</p>
           </div>
           <div style="min-width:220px;">
             <div id="wd-alert-${w.id}"></div>
-            <input type="text" class="wd-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
-            <button class="btn btn-sm btn-block wd-complete" data-id="${w.id}" style="margin-bottom:6px;">Mark paid</button>
-            <input type="text" class="wd-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <input type="text" class="wd-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+            <button class="btn btn-sm btn-block wd-complete" data-id="${w.id}" style="margin-bottom: var(--space-2);">Mark paid</button>
+            <input type="text" class="wd-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <button class="btn btn-outline btn-sm btn-block wd-reject" data-id="${w.id}">Reject</button>
           </div>
         </div>
@@ -1480,12 +1691,12 @@ async function renderPlatformWallet(content) {
     const data = await apiFetch('/api/wallet/platform/');
     const w = data.wallet;
     content.innerHTML = `
-      <div class="card" style="padding:var(--space-5); margin-bottom:18px;">
+      <div class="card" style="padding:var(--space-5); margin-bottom: var(--space-5);">
         <p class="text-muted" style="margin:0;">Platform commission balance</p>
         <div style="font-size:2rem; font-weight:700;">${money(w.balance, w.currency)}</div>
-        <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">${data.commission_entries_last_30_days} commission entries in the last 30 days</p>
+        <p class="text-muted" style="font-size:0.85rem; margin-top: var(--space-2);">${data.commission_entries_last_30_days} commission entries in the last 30 days</p>
       </div>
-      <h4 style="margin-bottom:10px;">Recent ledger entries</h4>
+      <h4 style="margin-bottom: var(--space-3);">Recent ledger entries</h4>
       ${data.recent_entries.length ? data.recent_entries.map((e) => `
         <div class="table-row">
           <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
@@ -1524,7 +1735,7 @@ async function renderTreasuryTab(content) {
       <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
         <p class="text-muted" style="margin:0;">Platform commission balance</p>
         <div style="font-size:2rem; font-weight:700;">${money(walletData.wallet.balance, walletData.wallet.currency)}</div>
-        <p class="text-muted" style="font-size:0.85rem; margin-top:6px;">Company withdrawals below move money out of this balance. Approval requires a super_admin ("company owner") account.</p>
+        <p class="text-muted" style="font-size:0.85rem; margin-top: var(--space-2);">Company withdrawals below move money out of this balance. Approval requires a super_admin ("company owner") account.</p>
       </div>
 
       <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-5);">
@@ -1537,7 +1748,7 @@ async function renderTreasuryTab(content) {
             <span>${a.is_active ? '<span class="pill pill-verified">active</span>' : '<span class="pill pill-draft">inactive</span>'}</span>
           </div>
         `).join('') : '<p class="text-muted">No company payout accounts yet -- add one below.</p>'}
-        <form id="treasury-account-form" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--color-border);">
+        <form id="treasury-account-form" style="margin-top: var(--space-4); padding-top: var(--space-4); border-top:1px solid var(--color-border);">
           <div class="field-row">
             <div class="form-group">
               <label for="ta-type">Account type</label>
@@ -1576,22 +1787,22 @@ async function renderTreasuryTab(content) {
         ` : '<div class="alert alert-info">Add a company payout account above first.</div>'}
       </div>
 
-      <h4 style="margin-bottom:10px;">Withdrawal requests</h4>
+      <h4 style="margin-bottom: var(--space-3);">Withdrawal requests</h4>
       <div id="treasury-withdrawals-list">
         ${withdrawals.length ? withdrawals.map((w) => `
-          <div class="card" style="padding:14px 18px; margin-bottom:var(--space-2);">
+          <div class="card card-compact" style="margin-bottom:var(--space-2);">
             <div class="flex-between" style="align-items:flex-start;">
               <div>
                 <strong>${money(w.amount)}</strong> &middot; ${escapeHtml(w.payout_account_display)}
                 ${pillFor(w.status, statusMap)}
-                <p class="text-muted" style="margin:4px 0 0 0; font-size:0.82rem;">${escapeHtml(w.reason || '')} &middot; requested by ${escapeHtml(w.requested_by_username)} &middot; ${timeAgo(w.created_at)}</p>
+                <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.82rem;">${escapeHtml(w.reason || '')} &middot; requested by ${escapeHtml(w.requested_by_username)} &middot; ${timeAgo(w.created_at)}</p>
               </div>
               ${isSuperAdmin && w.status === 'requested' ? `
                 <div style="min-width:200px;">
                   <div id="treasury-review-alert-${w.id}"></div>
-                  <input type="text" class="treasury-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
-                  <button class="btn btn-sm btn-block treasury-approve" data-id="${w.id}" style="margin-bottom:6px;">Approve &amp; complete</button>
-                  <input type="text" class="treasury-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom:6px; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <input type="text" class="treasury-payout-ref" data-id="${w.id}" placeholder="Payout reference" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
+                  <button class="btn btn-sm btn-block treasury-approve" data-id="${w.id}" style="margin-bottom: var(--space-2);">Approve &amp; complete</button>
+                  <input type="text" class="treasury-reject-reason" data-id="${w.id}" placeholder="Rejection reason" style="width:100%; margin-bottom: var(--space-2); padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
                   <button class="btn btn-outline btn-sm btn-block treasury-reject" data-id="${w.id}">Reject</button>
                 </div>
               ` : (w.status === 'requested' && !isSuperAdmin ? `<p class="text-muted" style="font-size:0.8rem;">Awaiting super_admin approval.</p>` : '')}
@@ -1727,7 +1938,16 @@ async function renderSettingsTab(content) {
         ${isAdmin ? 'Credentials are encrypted at rest and never shown in full once saved -- only a masked hint. Saved changes take effect immediately, no server restart needed.' : 'Viewing only -- editing credentials requires an admin account.'}
       </p>
       <div id="providers-area"></div>
-      ${statusData.debug_mode ? `<div class="alert alert-error" style="margin:20px 0;"><strong>DEBUG mode is ON.</strong> This should be OFF in production.</div>` : ''}
+      ${statusData.debug_mode ? `<div class="alert alert-error" style="margin: var(--space-5) 0;"><strong>DEBUG mode is ON.</strong> This should be OFF in production.</div>` : ''}
+
+      <h3 style="margin-bottom:var(--space-1); margin-top:var(--space-6);">Static pages</h3>
+      <p class="text-muted" style="font-size:0.85rem; margin-top:0;">About Us, Careers, Press Center, FAQ, Privacy Policy, Cookie Policy -- edited here, live on the site immediately.</p>
+      <div id="static-pages-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+
+      <h3 style="margin-bottom:var(--space-1); margin-top:var(--space-6);">Social links</h3>
+      <p class="text-muted" style="font-size:0.85rem; margin-top:0;">Shown in the homepage footer. Leave a field blank to hide that platform.</p>
+      <div id="social-links-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
+
       <h3 style="margin-bottom:var(--space-3); margin-top:var(--space-6);">Recent activity (audit log)</h3>
       <div id="audit-log-area"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
     `;
@@ -1736,6 +1956,9 @@ async function renderSettingsTab(content) {
     providersArea.innerHTML = Object.keys(PROVIDER_META).map((key) => renderProviderCard(key, statusData[key], isAdmin)).join('');
 
     Object.keys(PROVIDER_META).forEach((key) => wireProviderCard(key, isAdmin));
+
+    renderStaticPagesSettings(document.getElementById('static-pages-area'));
+    renderSocialLinksSettings(document.getElementById('social-links-area'));
 
     const auditArea = document.getElementById('audit-log-area');
     try {
@@ -1758,6 +1981,147 @@ async function renderSettingsTab(content) {
   }
 }
 
+async function renderStaticPagesSettings(container) {
+  try {
+    const pages = await apiFetch('/api/static-pages/');
+    container.innerHTML = `
+      <div id="static-pages-list">${pages.map(staticPageCardHtml).join('')}</div>
+      <button class="btn btn-outline btn-sm" id="new-static-page-btn" style="margin-top:var(--space-3);">+ New page</button>
+      <div id="new-static-page-form-area"></div>
+    `;
+    pages.forEach((p) => wireStaticPageCard(p.slug, container));
+    document.getElementById('new-static-page-btn').addEventListener('click', () => {
+      const area = document.getElementById('new-static-page-form-area');
+      area.innerHTML = area.innerHTML ? '' : staticPageFormHtml(null);
+      if (area.innerHTML) wireStaticPageForm(null, container);
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
+function staticPageCardHtml(p) {
+  return `
+    <div class="card" style="padding:var(--space-4); margin-bottom:var(--space-3);">
+      <div class="flex-between">
+        <div>
+          <strong>${escapeHtml(p.title)}</strong>
+          <span class="pill ${p.is_published ? 'pill-verified' : 'pill-draft'}">${p.is_published ? 'Published' : 'Draft'}</span>
+          <span class="text-muted" style="font-size:0.78rem;">&middot; /page.html?slug=${escapeHtml(p.slug)}</span>
+        </div>
+        <button class="btn btn-outline btn-sm static-page-edit-toggle" data-slug="${p.slug}">Edit</button>
+      </div>
+      <div class="hidden" id="static-page-form-${p.slug}"></div>
+    </div>
+  `;
+}
+
+function staticPageFormHtml(p) {
+  const slug = p?.slug || '';
+  const idSuffix = slug || 'new';
+  return `
+    <div style="margin-top:var(--space-3); padding-top:var(--space-3); border-top:1px solid var(--color-border);">
+      <div id="static-page-alert-${idSuffix}"></div>
+      ${!p ? `<div class="form-group"><label for="sp-slug-${idSuffix}">Slug</label><input type="text" id="sp-slug-${idSuffix}" placeholder="e.g. shipping-policy"></div>` : ''}
+      <div class="form-group"><label for="sp-title-${idSuffix}">Title</label><input type="text" id="sp-title-${idSuffix}" value="${escapeHtml(p?.title || '')}"></div>
+      <div class="form-group"><label for="sp-body-${idSuffix}">Body</label><textarea id="sp-body-${idSuffix}" style="min-height:140px;">${escapeHtml(p?.body || '')}</textarea></div>
+      <div class="form-group"><label for="sp-meta-${idSuffix}">Meta description (SEO)</label><input type="text" id="sp-meta-${idSuffix}" value="${escapeHtml(p?.meta_description || '')}"></div>
+      <label style="display:flex; align-items:center; gap: var(--space-2); font-size:0.85rem; margin-bottom:var(--space-3);">
+        <input type="checkbox" id="sp-published-${idSuffix}" style="width:auto;" ${p?.is_published ? 'checked' : ''}> Published (visible to the public)
+      </label>
+      <button class="btn btn-sm static-page-save-btn" data-slug="${slug}" data-id-suffix="${idSuffix}">Save</button>
+    </div>
+  `;
+}
+
+function wireStaticPageCard(slug, listContainer) {
+  const toggle = document.querySelector(`.static-page-edit-toggle[data-slug="${slug}"]`);
+  if (!toggle) return;
+  toggle.addEventListener('click', async () => {
+    const formArea = document.getElementById(`static-page-form-${slug}`);
+    if (!formArea.dataset.loaded) {
+      try {
+        const page = await apiFetch(`/api/static-pages/${encodeURIComponent(slug)}/`);
+        formArea.innerHTML = staticPageFormHtml(page);
+        formArea.dataset.loaded = '1';
+        wireStaticPageForm(slug, listContainer);
+      } catch (err) {
+        formArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      }
+    }
+    formArea.classList.toggle('hidden');
+  });
+}
+
+function wireStaticPageForm(slug, listContainer) {
+  const idSuffix = slug || 'new';
+  const btn = document.querySelector(`.static-page-save-btn[data-id-suffix="${idSuffix}"]`);
+  btn.addEventListener('click', async () => {
+    const alertBox = document.getElementById(`static-page-alert-${idSuffix}`);
+    alertBox.innerHTML = '';
+    const body = {
+      title: document.getElementById(`sp-title-${idSuffix}`).value,
+      body: document.getElementById(`sp-body-${idSuffix}`).value,
+      meta_description: document.getElementById(`sp-meta-${idSuffix}`).value,
+      is_published: document.getElementById(`sp-published-${idSuffix}`).checked,
+    };
+    if (!slug) body.slug = document.getElementById(`sp-slug-${idSuffix}`).value;
+
+    btn.disabled = true;
+    try {
+      if (slug) {
+        await apiFetch(`/api/static-pages/${encodeURIComponent(slug)}/`, { method: 'PATCH', body });
+      } else {
+        await apiFetch('/api/static-pages/', { method: 'POST', body });
+      }
+      renderStaticPagesSettings(listContainer);
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      btn.disabled = false;
+    }
+  });
+}
+
+async function renderSocialLinksSettings(container) {
+  const PLATFORMS = [
+    ['facebook', 'Facebook'], ['x', 'X'], ['instagram', 'Instagram'], ['linkedin', 'LinkedIn'],
+    ['youtube', 'YouTube'], ['tiktok', 'TikTok'], ['telegram', 'Telegram'], ['whatsapp', 'WhatsApp'],
+  ];
+  try {
+    const links = await apiFetch('/api/social-links/');
+    container.innerHTML = `
+      <div id="social-links-alert"></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3);">
+        ${PLATFORMS.map(([key, label]) => `
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="social-${key}">${label}</label>
+            <input type="text" id="social-${key}" value="${escapeHtml(links[key] || '')}" placeholder="https://&hellip;">
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-sm" id="save-social-links-btn" style="margin-top:var(--space-3);">Save social links</button>
+    `;
+    document.getElementById('save-social-links-btn').addEventListener('click', async () => {
+      const alertBox = document.getElementById('social-links-alert');
+      const btn = document.getElementById('save-social-links-btn');
+      alertBox.innerHTML = '';
+      btn.disabled = true;
+      const body = {};
+      PLATFORMS.forEach(([key]) => { body[key] = document.getElementById(`social-${key}`).value; });
+      try {
+        await apiFetch('/api/social-links/', { method: 'PUT', body });
+        alertBox.innerHTML = `<div class="alert alert-success" style="font-size:0.8rem; padding: var(--space-2);">Saved.</div>`;
+      } catch (err) {
+        alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
+  }
+}
+
 function renderProviderCard(providerKey, fieldsStatus, isAdmin) {
   const meta = PROVIDER_META[providerKey];
   const allSet = meta.fields.every((f) => fieldsStatus[f.name]?.is_set);
@@ -1767,17 +2131,17 @@ function renderProviderCard(providerKey, fieldsStatus, isAdmin) {
 
   return `
     <div class="card" style="padding:var(--space-5); margin-bottom:var(--space-4);">
-      <div class="flex-between" style="align-items:flex-start; margin-bottom:10px;">
+      <div class="flex-between" style="align-items:flex-start; margin-bottom: var(--space-3);">
         <div>
-          <h4 style="margin:0 0 2px 0;">${escapeHtml(meta.label)}</h4>
+          <h4 style="margin: 0 0 var(--space-1) 0;">${escapeHtml(meta.label)}</h4>
           <span style="font-size:0.8rem; font-weight:700; color:${overallColor};">${overallLabel}</span>
         </div>
         ${isAdmin ? `<button class="btn btn-outline btn-sm test-connection-btn" data-provider="${providerKey}">Test connection</button>` : ''}
       </div>
-      ${meta.note ? `<p class="text-muted" style="font-size:0.78rem; margin:0 0 12px 0;">${escapeHtml(meta.note)}</p>` : ''}
+      ${meta.note ? `<p class="text-muted" style="font-size:0.78rem; margin: 0 0 var(--space-3) 0;">${escapeHtml(meta.note)}</p>` : ''}
       <div id="test-result-${providerKey}"></div>
 
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:10px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); margin-top: var(--space-3);">
         ${meta.fields.map((f) => {
           const fstatus = fieldsStatus[f.name] || { is_set: false, value: '', source: 'unset' };
           const currentHint = f.secret
@@ -1799,8 +2163,8 @@ function renderProviderCard(providerKey, fieldsStatus, isAdmin) {
         }).join('')}
       </div>
       ${isAdmin ? `
-        <div id="save-alert-${providerKey}" style="margin-top:10px;"></div>
-        <button class="btn btn-sm" data-provider="${providerKey}" id="save-provider-${providerKey}" style="margin-top:10px;">Save ${escapeHtml(meta.label)} settings</button>
+        <div id="save-alert-${providerKey}" style="margin-top: var(--space-3);"></div>
+        <button class="btn btn-sm" data-provider="${providerKey}" id="save-provider-${providerKey}" style="margin-top: var(--space-3);">Save ${escapeHtml(meta.label)} settings</button>
       ` : ''}
     </div>
   `;
@@ -1865,9 +2229,9 @@ function wireProviderCard(providerKey, isAdmin) {
     try {
       const result = await apiFetch(`/api/integration-credentials/${providerKey}/test-connection/`, { method: 'POST', body: {} });
       const cls = result.success ? 'alert-success' : 'alert-error';
-      resultArea.innerHTML = `<div class="alert ${cls}" style="font-size:0.82rem; padding:10px; margin-bottom:10px;">${escapeHtml(result.message)}</div>`;
+      resultArea.innerHTML = `<div class="alert ${cls}" style="font-size:0.82rem; padding: var(--space-3); margin-bottom: var(--space-3);">${escapeHtml(result.message)}</div>`;
     } catch (err) {
-      resultArea.innerHTML = `<div class="alert alert-error" style="font-size:0.82rem; padding:10px; margin-bottom:10px;">${escapeHtml(formatApiError(err))}</div>`;
+      resultArea.innerHTML = `<div class="alert alert-error" style="font-size:0.82rem; padding: var(--space-3); margin-bottom: var(--space-3);">${escapeHtml(formatApiError(err))}</div>`;
     } finally {
       btn.disabled = false;
       btn.textContent = originalText;
@@ -1883,7 +2247,7 @@ async function renderReportsQueue(content) {
       return;
     }
     content.innerHTML = `
-      <p class="text-muted" style="margin-bottom:14px;">Reports are resolved via the Unified Queue sub-tab (each filed report also creates a queue item).</p>
+      <p class="text-muted" style="margin-bottom: var(--space-4);">Reports are resolved via the Unified Queue sub-tab (each filed report also creates a queue item).</p>
     ` + results.map((r) => `
       <div class="table-row">
         <span>${escapeHtml((r.reason || '').replace(/_/g, ' '))}</span>
@@ -1906,8 +2270,8 @@ async function renderUnifiedQueue(content) {
       return;
     }
     const bulkBar = `
-      <div class="card" style="padding:10px 16px; margin-bottom:var(--space-3); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem;">
+      <div class="card" style="padding: var(--space-3) var(--space-4); margin-bottom:var(--space-3); display:flex; align-items:center; gap: var(--space-3); flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap: var(--space-2); font-size:0.85rem;">
           <input type="checkbox" id="queue-select-all" style="width:auto;"> Select all
         </label>
         <span class="text-muted" style="font-size:0.82rem;" id="queue-selected-count">0 selected</span>
@@ -1917,16 +2281,16 @@ async function renderUnifiedQueue(content) {
       <div id="queue-bulk-alert"></div>
     `;
     content.innerHTML = bulkBar + results.map((item) => `
-      <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+      <div class="card card-compact" style="margin-bottom: var(--space-3);">
         <div class="flex-between">
-          <div style="display:flex; align-items:flex-start; gap:10px;">
+          <div style="display:flex; align-items:flex-start; gap: var(--space-3);">
             <input type="checkbox" class="queue-select" data-id="${item.id}" style="width:auto; margin-top:var(--space-1);">
             <div>
-              <div class="flex-between" style="justify-content:flex-start; gap:10px;">
+              <div class="flex-between" style="justify-content:flex-start; gap: var(--space-3);">
                 <strong>${escapeHtml((item.item_type || '').replace(/_/g, ' '))}</strong>
                 ${pillFor(item.priority, priorityMap)}
               </div>
-              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.8rem;">${timeAgo(item.created_at)} &middot; ref ${item.related_object_id.slice(0,8)}</p>
+              <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.8rem;">${timeAgo(item.created_at)} &middot; ref ${item.related_object_id.slice(0,8)}</p>
             </div>
           </div>
           <div style="text-align:right;">
@@ -1997,8 +2361,8 @@ async function renderUnifiedQueue(content) {
 
 async function renderSupportQueue(content) {
   content.innerHTML = `
-    <div class="field-row" style="margin-bottom:var(--space-4);">
-      <select id="support-status-filter" style="padding:8px 10px; border:1px solid var(--color-border); border-radius:6px;">
+    <div class="filters-bar" style="margin-bottom:var(--space-4);">
+      <select id="support-status-filter">
         <option value="open">Open</option>
         <option value="in_progress">In progress</option>
         <option value="resolved">Resolved</option>
@@ -2023,24 +2387,24 @@ async function renderSupportQueue(content) {
         return;
       }
       listEl.innerHTML = results.map((t) => `
-        <div class="card" style="padding:16px 20px; margin-bottom:10px;">
+        <div class="card card-compact" style="margin-bottom: var(--space-3);">
           <div class="flex-between" style="align-items:flex-start;">
             <div>
               <strong>${escapeHtml(t.subject)}</strong>
-              <span class="pill pill-draft" style="margin-left:6px;">${escapeHtml((t.category || '').replace('_', ' '))}</span>
+              <span class="pill pill-draft" style="margin-left: var(--space-2);">${escapeHtml((t.category || '').replace('_', ' '))}</span>
               ${pillFor(t.status, statusMap)}
-              <p class="text-muted" style="margin:6px 0 0 0; font-size:0.85rem;">${escapeHtml(t.user_username)}: ${escapeHtml(t.message)}</p>
-              <p class="text-muted" style="margin:4px 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
+              <p class="text-muted" style="margin: var(--space-2) 0 0 0; font-size:0.85rem;">${escapeHtml(t.user_username)}: ${escapeHtml(t.message)}</p>
+              <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.78rem;">${timeAgo(t.created_at)}</p>
             </div>
           </div>
           ${(t.messages || []).length ? `
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap:6px;">
+            <div style="margin-top: var(--space-3); padding-top: var(--space-3); border-top:1px solid var(--color-border); display:flex; flex-direction:column; gap: var(--space-2);">
               ${t.messages.map((m) => `
                 <div style="font-size:0.85rem;"><strong>${m.is_staff_reply ? 'Support' : escapeHtml(m.author_username)}:</strong> ${escapeHtml(m.message)} <span class="text-muted" style="font-size:0.72rem;">&middot; ${timeAgo(m.created_at)}</span></div>
               `).join('')}
             </div>
           ` : ''}
-          <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <div style="margin-top: var(--space-3); display:flex; gap: var(--space-2); align-items:center;">
             <input type="text" class="support-reply-input" data-id="${t.id}" placeholder="Reply&hellip;" style="flex:1; padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
             <select class="support-reply-status" data-id="${t.id}" style="padding:var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.85rem;">
               <option value="">Keep status</option>
@@ -2096,8 +2460,8 @@ async function renderFinancialsTab(content) {
           <option value="yearly">Yearly</option>
         </select>
       </div>
-      <button class="btn btn-outline btn-sm" id="fin-export-link" style="margin-bottom:2px;">Export CSV</button>
-      <button class="btn btn-outline btn-sm" id="fin-export-pdf-link" style="margin-bottom:2px;">Export PDF</button>
+      <button class="btn btn-outline btn-sm" id="fin-export-link" style="margin-bottom: var(--space-1);">Export CSV</button>
+      <button class="btn btn-outline btn-sm" id="fin-export-pdf-link" style="margin-bottom: var(--space-1);">Export PDF</button>
     </div>
     <div id="fin-summary"></div>
     <div id="fin-table"><p class="text-muted"><span class="spinner"></span> Loading&hellip;</p></div>
@@ -2119,18 +2483,18 @@ async function renderFinancialsTab(content) {
       const maxSales = Math.max(1, ...data.results.map((r) => Number(r.gross_sales)));
 
       document.getElementById('fin-summary').innerHTML = `
-        <div class="scoreboard" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:var(--space-5);">
-          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Gross sales</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.gross_sales)}</div></div>
-          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Platform commission</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.platform_commission)}</div></div>
-          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Orders</p><div style="font-size:1.3rem; font-weight:700;">${data.totals.order_count}</div></div>
-          <div class="card" style="padding:14px;"><p class="text-muted" style="margin:0; font-size:0.78rem;">Refunded</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.refunded_amount)}</div></div>
+        <div class="scoreboard" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap: var(--space-3); margin-bottom:var(--space-5);">
+          <div class="card" style="padding: var(--space-4);"><p class="text-muted" style="margin:0; font-size:0.78rem;">Gross sales</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.gross_sales)}</div></div>
+          <div class="card" style="padding: var(--space-4);"><p class="text-muted" style="margin:0; font-size:0.78rem;">Platform commission</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.platform_commission)}</div></div>
+          <div class="card" style="padding: var(--space-4);"><p class="text-muted" style="margin:0; font-size:0.78rem;">Orders</p><div style="font-size:1.3rem; font-weight:700;">${data.totals.order_count}</div></div>
+          <div class="card" style="padding: var(--space-4);"><p class="text-muted" style="margin:0; font-size:0.78rem;">Refunded</p><div style="font-size:1.3rem; font-weight:700;">${money(data.totals.refunded_amount)}</div></div>
         </div>
       `;
 
       document.getElementById('fin-table').innerHTML = data.results.length ? `
-        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:var(--space-5);">
+        <div style="display:flex; flex-direction:column; gap: var(--space-1); margin-bottom:var(--space-5);">
           ${data.results.map((r) => `
-            <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; align-items:center; gap: var(--space-3);">
               <span class="text-muted mono" style="width:110px; font-size:0.78rem;">${escapeHtml(r.period)}</span>
               <div style="flex:1; background:var(--color-bg-alt); border-radius:4px; overflow:hidden; height:18px;">
                 <div style="width:${(Number(r.gross_sales) / maxSales) * 100}%; background:var(--color-gold); height:100%;"></div>

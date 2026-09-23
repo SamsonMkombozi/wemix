@@ -18,7 +18,7 @@
 
 <footer>
   <div class="container flex-between">
-    <span>&copy; 2026 Habari Platform &middot; Arusha, Tanzania</span>
+    <span>&copy; 2026 WEMIX &middot; Dar es Salaam, Tanzania</span>
     <a href="index.html">&larr; Back to marketplace</a>
   </div>
 </footer>
@@ -28,6 +28,7 @@
 <script>
 const slug = new URLSearchParams(window.location.search).get('slug');
 const content = document.getElementById('content');
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function pillForVerification(status) {
   const map = { verified: 'pill-verified', partially_verified: 'pill-verified', needs_human_review: 'pill-pending', rejected: 'pill-rejected', pending: 'pill-pending' };
@@ -67,14 +68,24 @@ async function shareToSocial(btn) {
     const data = await apiFetch(`/api/news/listings/${encodeURIComponent(btn.dataset.slug)}/social-share/`, {
       method: 'POST', body: { provider: btn.dataset.provider },
     });
-    if (!data.manual) {
+    if (data.copy) {
+      await (navigator.clipboard?.writeText(data.share_url).catch(() => {
+        const tmp = document.createElement('input');
+        tmp.value = data.share_url;
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand('copy');
+        tmp.remove();
+      }));
+      resultEl.innerHTML = `<div class="alert alert-success" style="font-size:0.85rem;">Link copied to clipboard.</div>`;
+    } else if (!data.manual) {
       window.open(data.share_url, '_blank', 'noopener,width=600,height=500');
     } else {
       resultEl.innerHTML = `
         <div class="alert alert-info" style="font-size:0.85rem;">
           ${escapeHtml(data.detail)}
-          <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-            <input type="text" readonly value="${escapeHtml(data.caption)}" style="flex:1; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="social-caption-input">
+          <div style="display:flex; gap: var(--space-2); align-items:center; margin-top: var(--space-2);">
+            <input type="text" readonly value="${escapeHtml(data.caption)}" style="flex:1; padding: var(--space-2) var(--space-2); border:1px solid var(--color-border); border-radius:6px; font-size:0.8rem;" id="social-caption-input">
             <button class="btn btn-sm" id="social-caption-copy">Copy caption</button>
           </div>
         </div>
@@ -115,6 +126,137 @@ function setMeta(attr, key, content) {
   tag.setAttribute('content', content);
 }
 
+/* Subtle parallax on the hero image: on scroll, drifts the (deliberately
+   oversized, see .listing-hero-img's -6%/112% sizing in css/style.css)
+   image a few percent slower than the page itself. Skipped entirely
+   under prefers-reduced-motion -- a flourish, never load-bearing. */
+function wireHeroParallax() {
+  if (REDUCED_MOTION) return;
+  const hero = document.querySelector('.listing-hero');
+  const img = document.querySelector('.listing-hero-img');
+  if (!hero || !img) return;
+  const onScroll = () => {
+    const rect = hero.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+    const drift = rect.top * -0.06;
+    img.style.transform = `translateY(${drift}px)`;
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  catch (e) { return ''; }
+}
+
+function intelItem(label, value) {
+  if (value === null || value === undefined || value === '') return '';
+  return `<div><div class="intel-item-label">${escapeHtml(label)}</div><div class="intel-item-value">${value}</div></div>`;
+}
+
+/* Renders every wire/IPTC-style metadata field the API returns for this
+   listing's media (credit line, capture date, GPS, keywords) plus the
+   listing's own license/territory/source -- previously serialized but
+   never shown anywhere on this page. */
+function renderIntelPanel(listing) {
+  const media = (listing.media || []).find((m) => m.credit_line || m.capture_date || m.gps_latitude != null || m.keywords) || {};
+  const items = [
+    intelItem('Source', escapeHtml(listing.seller_username)),
+    intelItem('License', escapeHtml((listing.license_type || 'standard').replace('_', ' '))),
+    intelItem('Territory', escapeHtml(listing.license_territory || 'Worldwide')),
+    intelItem('Location', escapeHtml(listing.location || '&mdash;')),
+    media.credit_line ? intelItem('Credit line', escapeHtml(media.credit_line)) : '',
+    media.capture_date ? intelItem('Captured', formatDate(media.capture_date)) : '',
+    (media.gps_latitude != null && media.gps_longitude != null) ? intelItem('GPS', `${media.gps_latitude}, ${media.gps_longitude}`) : '',
+    media.keywords ? intelItem('Keywords', escapeHtml(media.keywords)) : '',
+  ].filter(Boolean);
+  if (!items.length) return '';
+  return `<div class="card intel-panel">${items.join('')}</div>`;
+}
+
+/* Professional seller-profile module -- listings/sales/rating/joined
+   stats the detail API now computes server-side (see
+   NewsListingDetailSerializer.get_seller_*), plus the existing
+   badge/bio/social/follow/subscribe affordances that used to be a few
+   loose lines in the main column. */
+function renderSellerCard(listing, user, isOwner) {
+  const initial = (listing.seller_username || '?').charAt(0).toUpperCase();
+  const joined = listing.seller_join_date ? formatDate(listing.seller_join_date) : '&mdash;';
+  return `
+    <div class="card seller-card">
+      <div class="seller-card-head">
+        <div class="seller-card-avatar">${listing.seller_avatar ? `<img src="${listing.seller_avatar}" alt="">` : escapeHtml(initial)}</div>
+        <div style="flex:1; min-width:0;">
+          <div class="seller-card-name">
+            <a href="listing.html?slug=${encodeURIComponent(listing.slug)}" style="color:inherit;">${escapeHtml(listing.seller_username)}</a>
+            ${listing.seller_verified_badge ? `<span class="trust-badge on-light gold" title="Verified publisher">&#10003; Verified</span>` : ''}
+            ${listing.seller_trust_score != null ? `<span class="pill ${listing.seller_trust_score >= 70 ? 'pill-verified' : (listing.seller_trust_score >= 40 ? 'pill-pending' : 'pill-rejected')}" title="Platform trust score, adjusted by moderation history">Trust ${listing.seller_trust_score}</span>` : ''}
+          </div>
+          ${listing.seller_bio ? `<p class="text-muted" style="font-size:0.83rem; margin: var(--space-1) 0 0 0;">${escapeHtml(listing.seller_bio)}</p>` : ''}
+        </div>
+      </div>
+
+      <div class="seller-stats-row">
+        <div class="seller-stat"><div class="seller-stat-num">${listing.seller_listing_count ?? 0}</div><div class="seller-stat-label">Listings</div></div>
+        <div class="seller-stat"><div class="seller-stat-num">${listing.seller_total_sales ?? 0}</div><div class="seller-stat-label">Sold</div></div>
+        <div class="seller-stat"><div class="seller-stat-num">${listing.seller_overall_rating != null ? listing.seller_overall_rating : '&mdash;'}</div><div class="seller-stat-label">${listing.seller_review_count ? listing.seller_review_count + ' review' + (listing.seller_review_count === 1 ? '' : 's') : 'Rating'}</div></div>
+        <div class="seller-stat"><div class="seller-stat-num" style="font-size:0.82rem;">${joined}</div><div class="seller-stat-label">Joined</div></div>
+      </div>
+
+      ${(listing.seller_website_url || listing.seller_twitter_url || listing.seller_facebook_url) ? `
+        <p style="margin: 0 0 var(--space-3) 0; font-size:0.8rem;">
+          ${listing.seller_website_url ? `<a href="${escapeHtml(listing.seller_website_url)}" target="_blank" rel="noopener" style="margin-right: var(--space-3);">Website</a>` : ''}
+          ${listing.seller_twitter_url ? `<a href="${escapeHtml(listing.seller_twitter_url)}" target="_blank" rel="noopener" style="margin-right: var(--space-3);">Twitter/X</a>` : ''}
+          ${listing.seller_facebook_url ? `<a href="${escapeHtml(listing.seller_facebook_url)}" target="_blank" rel="noopener">Facebook</a>` : ''}
+        </p>
+      ` : ''}
+
+      <div class="flex-between">
+        <span class="text-muted" style="font-size:0.85rem;">${listing.seller_follower_count != null ? listing.seller_follower_count : 0} follower${listing.seller_follower_count === 1 ? '' : 's'}</span>
+        <div>
+          ${(user && !isOwner) ? `<button class="btn btn-outline btn-sm" id="follow-seller-btn" data-slug="${listing.slug}">${listing.is_following_seller ? 'Following' : 'Follow'}</button>` : ''}
+          ${(user && !isOwner && listing.seller_subscription_price != null) ? `<button class="btn btn-sm" id="subscribe-seller-btn" data-seller="${listing.seller}" style="margin-left: var(--space-2);">Subscribe &middot; ${money(listing.seller_subscription_price)}/mo</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function relatedCardHtml(l) {
+  const cover = l.cover_image;
+  return `
+    <a class="card listing-card" href="listing.html?slug=${encodeURIComponent(l.slug)}">
+      <div class="listing-card-media">${cover ? `<img src="${cover}" alt="">` : escapeHtml((l.news_type || '').replace('_', ' '))}</div>
+      <div class="listing-card-body">
+        <div class="listing-eyebrow">${escapeHtml((l.news_type || '').replace('_', ' '))}</div>
+        <h4 class="listing-title">${escapeHtml(l.title)}</h4>
+        <p class="listing-desc">${escapeHtml(l.description || '')}</p>
+        <div class="listing-meta"><span class="listing-price">${money(l.price, l.currency)}</span><span class="text-muted">${timeAgo(l.created_at)}</span></div>
+      </div>
+    </a>
+  `;
+}
+
+async function renderRelatedSection(container, title, params, excludeSlug) {
+  try {
+    const q = new URLSearchParams(params);
+    q.set('exclude_slug', excludeSlug);
+    const data = await apiFetch(`/api/news/listings/?${q.toString()}`, { auth: false });
+    const results = (data.results || data).slice(0, 4);
+    if (!results.length) { container.innerHTML = ''; return; }
+    container.innerHTML = `
+      <div class="related-section">
+        <h2>${escapeHtml(title)}</h2>
+        <div class="grid">${results.map(relatedCardHtml).join('')}</div>
+      </div>
+    `;
+  } catch (e) {
+    container.innerHTML = ''; // related content is supplementary -- never blocks the page
+  }
+}
+
 function renderListing(listing) {
   const description = listing.meta_description || listing.description || '';
   const cover = (listing.media || []).find((m) => m.is_cover) || (listing.media || [])[0];
@@ -138,14 +280,31 @@ function renderListing(listing) {
   setMeta('name', 'twitter:description', description);
   if (coverUrl) setMeta('name', 'twitter:image', coverUrl);
 
-  const mediaHtml = cover
-    ? `<div class="detail-media"><img src="${cover.preview_file || cover.file}" alt=""></div>`
-    : '';
+  const heroHtml = `
+    <div class="listing-hero">
+      ${coverUrl ? `<img class="listing-hero-img" src="${coverUrl}" alt="">` : ''}
+      <div class="listing-hero-scrim"></div>
+      <div class="listing-hero-content">
+        <div class="listing-hero-badges">
+          <span class="trust-badge">${escapeHtml((listing.news_type || '').replace('_', ' '))}</span>
+          ${pillForVerification(listing.verification_status)}
+          ${listing.featured ? `<span class="trust-badge gold">&#9733; Featured</span>` : ''}
+          ${listing.seller_verified_badge ? `<span class="trust-badge">&#10003; Verified publisher</span>` : ''}
+        </div>
+        <h1>${escapeHtml(listing.title)}</h1>
+        <div class="listing-hero-meta">
+          <span>${escapeHtml(listing.byline || ('By ' + listing.seller_username))}${listing.dateline ? ' &mdash; ' + escapeHtml(listing.dateline) : ''}</span>
+          ${listing.reading_time_minutes ? `<span>&middot; ${listing.reading_time_minutes} min read</span>` : ''}
+          ${listing.location ? `<span>&middot; ${escapeHtml(listing.location)}</span>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
 
   const correctionsHtml = (listing.corrections || []).length ? listing.corrections.map((c) => `
-    <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom:10px;">
+    <div class="alert ${c.is_retraction ? 'alert-error' : 'alert-info'}" style="margin-bottom: var(--space-3);">
       <strong>${c.is_retraction ? '&#9888; Retraction' : 'Correction'}${c.created_by_username ? ' by ' + escapeHtml(c.created_by_username) : ''} &middot; ${timeAgo(c.created_at)}</strong>
-      <p style="margin:6px 0 0 0;">${escapeHtml(c.text)}</p>
+      <p style="margin: var(--space-2) 0 0 0;">${escapeHtml(c.text)}</p>
     </div>
   `).join('') : '';
 
@@ -154,7 +313,7 @@ function renderListing(listing) {
          <h3>This story is locked</h3>
          <p>Purchase this listing to read the full report.</p>
        </div>`
-    : `<div class="card" style="padding:22px;"><p style="white-space:pre-wrap;">${escapeHtml(listing.body)}</p></div>`;
+    : `<div class="card" style="padding: var(--space-6);"><p style="white-space:pre-wrap;">${escapeHtml(listing.body)}</p></div>`;
 
   const user = Auth.getUser();
   const isOwner = user && listing.seller === user.id;
@@ -162,47 +321,28 @@ function renderListing(listing) {
     ? `<span class="rating-summary">${starString(listing.average_rating)} <strong>${listing.average_rating}</strong> <span class="text-muted">(${listing.review_count} review${listing.review_count === 1 ? '' : 's'})</span></span>`
     : `<span class="text-muted">No reviews yet</span>`;
 
-  const bylineLine = listing.byline
-    ? `${escapeHtml(listing.byline)}${listing.dateline ? ' &mdash; ' + escapeHtml(listing.dateline) : ''}`
-    : `By ${escapeHtml(listing.seller_username)}${listing.dateline ? ' &mdash; ' + escapeHtml(listing.dateline) : ''}`;
-  const readingTimeLine = listing.reading_time_minutes ? ` &middot; ${listing.reading_time_minutes} min read` : '';
+  const SOCIAL_PROVIDERS = [
+    ['facebook', 'Facebook'], ['x', 'X'], ['linkedin', 'LinkedIn'], ['whatsapp', 'WhatsApp'],
+    ['telegram', 'Telegram'], ['email', 'Email'], ['copy_link', 'Copy Link'],
+    ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'],
+  ];
 
   content.innerHTML = `
+    ${heroHtml}
     <div class="detail-grid">
       <div>
         ${correctionsHtml}
-        ${mediaHtml}
-        <div class="listing-eyebrow">${escapeHtml((listing.news_type || '').replace('_', ' '))} &middot; ${pillForVerification(listing.verification_status)}${listing.featured ? ' &middot; <span class="pill pill-verified">Featured</span>' : ''}</div>
-        <h1>${escapeHtml(listing.title)}</h1>
-        <p class="text-muted" style="display:flex; align-items:center; gap:8px;">
-          ${listing.seller_avatar ? `<img src="${listing.seller_avatar}" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : ''}
-          <span>${bylineLine}${readingTimeLine} &middot; ${escapeHtml(listing.location || '')}</span>
-          ${listing.seller_verified_badge ? `<span title="Verified publisher" style="color:var(--color-gold-dark); font-weight:700;">&#10003;</span>` : ''}
-          ${listing.seller_trust_score != null ? `<span class="pill ${listing.seller_trust_score >= 70 ? 'pill-verified' : (listing.seller_trust_score >= 40 ? 'pill-pending' : 'pill-rejected')}" title="Platform trust score, adjusted by moderation history">Trust ${listing.seller_trust_score}</span>` : ''}
-        </p>
-        ${listing.seller_bio ? `<p class="text-muted" style="font-size:0.85rem; margin:2px 0 6px 0;">${escapeHtml(listing.seller_bio)}</p>` : ''}
-        ${(listing.seller_website_url || listing.seller_twitter_url || listing.seller_facebook_url) ? `
-          <p style="margin:2px 0 6px 0; font-size:0.8rem;">
-            ${listing.seller_website_url ? `<a href="${escapeHtml(listing.seller_website_url)}" target="_blank" rel="noopener" style="margin-right:10px;">Website</a>` : ''}
-            ${listing.seller_twitter_url ? `<a href="${escapeHtml(listing.seller_twitter_url)}" target="_blank" rel="noopener" style="margin-right:10px;">Twitter/X</a>` : ''}
-            ${listing.seller_facebook_url ? `<a href="${escapeHtml(listing.seller_facebook_url)}" target="_blank" rel="noopener">Facebook</a>` : ''}
-          </p>
-        ` : ''}
-        <p style="margin:2px 0 10px 0;">
-          <span class="text-muted" style="font-size:0.85rem;">${listing.seller_follower_count != null ? listing.seller_follower_count : 0} follower${listing.seller_follower_count === 1 ? '' : 's'}</span>
-          ${(user && !isOwner) ? `<button class="btn btn-outline btn-sm" id="follow-seller-btn" data-slug="${listing.slug}" style="margin-left:10px; padding:3px 12px; font-size:0.8rem;">${listing.is_following_seller ? 'Following' : 'Follow'}</button>` : ''}
-          ${(user && !isOwner && listing.seller_subscription_price != null) ? `<button class="btn btn-sm" id="subscribe-seller-btn" data-seller="${listing.seller}" style="margin-left:6px; padding:3px 12px; font-size:0.8rem;">Subscribe &middot; ${money(listing.seller_subscription_price)}/mo</button>` : ''}
-        </p>
-        <p style="margin:6px 0 14px 0;">${ratingHtml}</p>
-        <p style="font-size:0.8rem;"><span class="pill pill-draft">${escapeHtml((listing.license_type || 'standard').replace('_', ' '))} license</span> <span class="text-muted">&middot; ${escapeHtml(listing.license_territory || 'Worldwide')}</span></p>
+        ${renderSellerCard(listing, user, isOwner)}
+        ${renderIntelPanel(listing)}
         <p>${escapeHtml(listing.description)}</p>
+        <p style="margin: var(--space-2) 0 var(--space-4) 0;">${ratingHtml}</p>
         ${listing.is_free_preview ? `<div class="alert alert-info">You're reading this as a free preview (part of your monthly free-story allowance) -- not purchased.</div>` : ''}
         ${bodyHtml}
         ${!listing.body_locked && (listing.media || []).length ? `
-          <div class="card" style="padding:16px 20px; margin-top:14px;">
-            <h4 style="margin:0 0 10px 0;">Download original media</h4>
+          <div class="card card-compact" style="margin-top: var(--space-4);">
+            <h4 style="margin: 0 0 var(--space-3) 0;">Download original media</h4>
             <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">You've unlocked this story -- these are the original files, not the watermarked/preview versions shown above. Purchasing access doesn't transfer copyright; see the Terms for permitted use.</p>
-            <div style="display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; flex-direction:column; gap: var(--space-2);">
               ${listing.media.map((m) => `
                 <button class="btn btn-outline btn-sm media-download-btn" data-slug="${listing.slug}" data-media-id="${m.id}" style="justify-content:flex-start; text-align:left;">
                   &#8681; ${escapeHtml(m.media_type)}${m.is_cover ? ' (cover)' : ''}
@@ -212,36 +352,43 @@ function renderListing(listing) {
           </div>
         ` : ''}
         ${!listing.body_locked ? `
-          <div class="card" style="padding:16px 20px; margin-top:14px;">
-            <h4 style="margin:0 0 10px 0;">Share to social media</h4>
-            <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">Facebook, X, LinkedIn and WhatsApp open a real share dialog for your own account. Instagram, TikTok and YouTube don't offer a direct-post link without a registered developer app, so those give you a ready-to-paste caption instead.</p>
-            <div style="display:flex; flex-wrap:wrap; gap:8px;">
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="facebook">Facebook</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="x">X</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="linkedin">LinkedIn</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="whatsapp">WhatsApp</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="instagram">Instagram</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="tiktok">TikTok</button>
-              <button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="youtube">YouTube</button>
+          <div class="card card-compact" style="margin-top: var(--space-4);">
+            <h4 style="margin: 0 0 var(--space-3) 0;">Share this story</h4>
+            <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">Facebook, X, LinkedIn, WhatsApp and Telegram open a real share dialog; Email drafts a message. Instagram, TikTok and YouTube don't offer a direct-post link without a registered developer app, so those give you a ready-to-paste caption instead.</p>
+            <div style="display:flex; flex-wrap:wrap; gap: var(--space-2);">
+              ${SOCIAL_PROVIDERS.map(([id, label]) => `<button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="${id}">${escapeHtml(label)}</button>`).join('')}
             </div>
-            <div id="social-share-result" style="margin-top:10px;"></div>
+            <div id="social-share-result" style="margin-top: var(--space-3);"></div>
           </div>
         ` : ''}
-        <div id="reviews-section" style="margin-top:28px;"></div>
+        <div id="reviews-section" style="margin-top: var(--space-7);"></div>
+        <div id="more-from-seller"></div>
+        <div id="related-stories"></div>
+        <div id="trending-in-category"></div>
       </div>
       <div>
         <div class="card buy-box">
           <div class="buy-price">${money(listing.price, listing.currency)}</div>
           <p class="text-muted" style="margin-top:0;">One-time purchase, instant access.</p>
           <div id="buy-area"></div>
-          ${user ? `<button class="btn btn-outline btn-sm btn-block" id="bookmark-btn" data-slug="${listing.slug}" style="margin-top:10px;">${listing.is_bookmarked ? '&#9733; Bookmarked' : '&#9734; Save for later'}</button>` : ''}
+          ${user ? `<button class="btn btn-outline btn-sm btn-block" id="bookmark-btn" data-slug="${listing.slug}" style="margin-top: var(--space-3);">${listing.is_bookmarked ? '&#9733; Bookmarked' : '&#9734; Save for later'}</button>` : ''}
+          <ul class="buy-guarantee-list">
+            <li>Secure payment via Selcom / Nala</li>
+            <li>Instant unlock after payment confirms</li>
+            <li>Tracked refund process if something's wrong</li>
+          </ul>
+          ${listing.recent_purchase_count > 0 ? `<div class="scarcity-note">&#128293; ${listing.recent_purchase_count} purchase${listing.recent_purchase_count === 1 ? '' : 's'} this week</div>` : ''}
         </div>
       </div>
     </div>
   `;
 
+  wireHeroParallax();
   renderBuyArea(listing, isOwner);
   renderReviewsSection(listing);
+  renderRelatedSection(document.getElementById('more-from-seller'), 'More From This Seller', { seller: listing.seller, ordering: '-created_at' }, listing.slug);
+  renderRelatedSection(document.getElementById('related-stories'), 'Related Stories', { category: listing.category, ordering: '-created_at' }, listing.slug);
+  renderRelatedSection(document.getElementById('trending-in-category'), 'Trending In Category', { category: listing.category, trending: '1' }, listing.slug);
 
   content.querySelectorAll('.media-download-btn').forEach((btn) => {
     btn.addEventListener('click', () => downloadMedia(btn));
@@ -273,12 +420,12 @@ function renderListing(listing) {
       try {
         const result = await apiFetch(`/api/news/listings/${encodeURIComponent(listing.slug)}/follow-seller/`, { method: 'POST' });
         followBtn.textContent = result.is_following_seller ? 'Following' : 'Follow';
-        const countEl = followBtn.previousElementSibling;
-        if (countEl) {
+        const statNum = followBtn.closest('.seller-card')?.querySelector('.flex-between .text-muted');
+        if (statNum) {
           const current = listing.seller_follower_count || 0;
           const updated = result.is_following_seller ? current + 1 : Math.max(0, current - 1);
           listing.seller_follower_count = updated;
-          countEl.textContent = `${updated} follower${updated === 1 ? '' : 's'}`;
+          statNum.textContent = `${updated} follower${updated === 1 ? '' : 's'}`;
         }
       } catch (err) {
         alert(formatApiError(err));
@@ -331,13 +478,13 @@ async function renderReviewsSection(listing) {
 
   const reviewsHtml = reviews.length
     ? reviews.map((r) => `
-        <div class="card" style="padding:14px 18px; margin-bottom:10px;">
+        <div class="card card-compact" style="margin-bottom: var(--space-3);">
           <div class="flex-between">
             <strong>${escapeHtml(r.reviewer_username)}</strong>
             <span>${starString(r.rating)}</span>
           </div>
-          ${r.comment ? `<p style="margin:6px 0 0 0; font-size:0.9rem;">${escapeHtml(r.comment)}</p>` : ''}
-          <p class="text-muted" style="margin:6px 0 0 0; font-size:0.78rem;">${timeAgo(r.created_at)}</p>
+          ${r.comment ? `<p style="margin: var(--space-2) 0 0 0; font-size:0.9rem;">${escapeHtml(r.comment)}</p>` : ''}
+          <p class="text-muted" style="margin: var(--space-2) 0 0 0; font-size:0.78rem;">${timeAgo(r.created_at)}</p>
         </div>
       `).join('')
     : `<p class="text-muted">No reviews yet -- be the first to review this after purchasing.</p>`;
@@ -363,7 +510,7 @@ async function renderReviewForm(listing) {
   if (!myPaidOrder) return; // haven't purchased, or already reviewed (order has a review already)
 
   el.innerHTML = `
-    <div class="card" style="padding:18px; margin-bottom:14px;">
+    <div class="card" style="padding: var(--space-5); margin-bottom: var(--space-4);">
       <h4 style="margin-top:0;">Leave a review</h4>
       <div id="review-alert"></div>
       <form id="review-form">
@@ -453,7 +600,7 @@ function renderBuyArea(listing, isOwner) {
         <option value="GBP">GBP</option>
         <option value="EUR">EUR</option>
       </select>
-      <p class="text-muted" style="font-size:0.78rem; margin-top:4px;">International payments are processed via Nala/Rafiki.</p>
+      <p class="text-muted" style="font-size:0.78rem; margin-top: var(--space-1);">International payments are processed via Nala/Rafiki.</p>
     </div>
     <button class="btn btn-block" id="buy-btn">Buy &amp; unlock</button>
   `;

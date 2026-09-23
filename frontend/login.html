@@ -26,15 +26,15 @@
     <div class="auth-panel-foot">&copy; 2026 WEMIX &mdash; Global News Market</div>
   </aside>
 
-  <div class="auth-form-col">
+  <main class="auth-form-col">
     <div class="auth-form-topbar">
       <a href="index.html"><img src="images/wemix.jpeg" alt="WEMIX"></a>
       <a href="index.html" class="auth-back-link">&larr; Back to marketplace</a>
     </div>
     <div class="auth-form-center">
-      <div class="card auth-form-card" style="padding:32px;">
+      <div class="card auth-form-card card-spacious">
         <h2>Welcome back</h2>
-        <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Log in to your WEMIX account.</p>
+        <p class="text-muted" style="margin-top:-8px;margin-bottom: var(--space-5);">Log in to your WEMIX account.</p>
 
         <div id="form-alert"></div>
 
@@ -45,7 +45,10 @@
           </div>
 
           <div class="form-group">
-            <label for="password">Password</label>
+            <div class="flex-between">
+              <label for="password" style="margin-bottom:0;">Password</label>
+              <a href="reset-password.html" style="font-size:0.8rem; font-weight:600; color:var(--color-gold-dark);">Forgot password?</a>
+            </div>
             <input type="password" id="password" required autocomplete="current-password">
           </div>
 
@@ -58,12 +61,12 @@
           <button type="submit" class="btn btn-block" id="submit-btn">Log in</button>
         </form>
 
-        <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+        <p class="text-muted" style="margin-top: var(--space-5); text-align:center; font-size:0.85rem;">
           New here? <a href="register.html" style="color:var(--color-gold-dark); font-weight:600;">Create an account</a>
         </p>
       </div>
     </div>
-  </div>
+  </main>
 </div>
 
 <script src="js/api.js"></script>

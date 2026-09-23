@@ -24,11 +24,20 @@ from .serializers import (
     IdentityVerificationReviewSerializer,
     IdentityVerificationSerializer,
     ModeratorUserSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     UserAdminEditSerializer,
     UserSerializer,
 )
-from .services import deactivate_account, log_action, read_email_verification_token, send_verification_email
+from .services import (
+    blacklist_all_tokens_for_user,
+    deactivate_account,
+    log_action,
+    read_email_verification_token,
+    send_password_reset_email,
+    send_verification_email,
+)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -242,9 +251,67 @@ class ChangePasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save(update_fields=["password"])
+        blacklist_all_tokens_for_user(request.user)
         log_action(actor=request.user, action=AuditLog.Action.UPDATE, target_model="User",
                    target_id=request.user.id, description="Password changed.", request=request)
         return Response({"detail": "Password updated."})
+
+
+class PasswordResetRequestView(APIView):
+    """POST /api/accounts/password-reset/request/  { "email": "..." }
+
+    Always returns the same generic 200 response, whether or not the
+    email matches an account -- the alternative (a 404 for unknown
+    emails) turns this endpoint into an account-existence oracle, which
+    is exactly the kind of thing a password-reset flow must not leak."""
+
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        from django.contrib.auth.tokens import default_token_generator
+        from django.utils.encoding import force_bytes
+        from django.utils.http import urlsafe_base64_encode
+
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        generic_response = Response({"detail": "If an account exists for that email, a reset link has been sent."})
+
+        user = User.objects.filter(email__iexact=serializer.validated_data["email"], is_deleted=False).first()
+        if not user:
+            return generic_response
+
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        token = default_token_generator.make_token(user)
+        send_password_reset_email(user, uid, token)
+        # Deliberately no audit-log entry keyed on the target account here
+        # -- logging "password reset requested" against an arbitrary
+        # email an anonymous caller typed in would let that same
+        # unauthenticated caller pollute another user's audit trail.
+        # PasswordResetConfirmView logs the action that actually matters:
+        # the password changing.
+        return generic_response
+
+
+class PasswordResetConfirmView(APIView):
+    """POST /api/accounts/password-reset/confirm/  { "uid", "token", "new_password" }"""
+
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        blacklist_all_tokens_for_user(user)
+        log_action(actor=user, action=AuditLog.Action.UPDATE, target_model="User", target_id=user.id,
+                   description="Password reset via email link.", request=request)
+        return Response({"detail": "Password has been reset. You can now log in with your new password."})
 
 
 class IdentityVerificationCreateListView(generics.ListCreateAPIView):

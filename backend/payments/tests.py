@@ -137,6 +137,64 @@ class CreateOrderRulesTests(APITestCase):
             create_order_and_initiate_payment(buyer=self.buyer, listing=self.listing, channel="mobile_money", msisdn="0712345678")
 
 
+class OrderDetailAndCancelTests(APITestCase):
+    """Backs the checkout.html redesign: a real order summary (listing
+    title, seller, amount, payment method) and a way to cancel a
+    still-pending order instead of being stuck on a spinner forever."""
+
+    def setUp(self):
+        self.seller = make_seller()
+        self.buyer = make_buyer()
+        self.other_buyer = make_buyer("otherbuyer_checkout")
+        self.listing = make_listing(self.seller)
+        self.order = Order.objects.create(
+            buyer=self.buyer, listing=self.listing, amount=self.listing.price,
+            status=Order.Status.PENDING_PAYMENT, payment_provider=Order.PaymentProvider.SELCOM,
+        )
+
+    def test_order_detail_includes_summary_fields(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.get(f"/api/payments/orders/{self.order.id}/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["listing_title"], self.listing.title)
+        self.assertEqual(resp.data["seller_username"], self.seller.username)
+        self.assertEqual(resp.data["payment_provider"], "selcom")
+
+    def test_other_buyer_cannot_view_order_detail(self):
+        self.client.force_authenticate(self.other_buyer)
+        resp = self.client.get(f"/api/payments/orders/{self.order.id}/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_buyer_can_cancel_pending_order(self):
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.post(f"/api/payments/orders/{self.order.id}/cancel/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.CANCELLED)
+
+    def test_cannot_cancel_an_already_paid_order(self):
+        self.order.status = Order.Status.PAID
+        self.order.save()
+        self.client.force_authenticate(self.buyer)
+        resp = self.client.post(f"/api/payments/orders/{self.order.id}/cancel/")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PAID)
+
+    def test_other_buyer_cannot_cancel_someone_elses_order(self):
+        self.client.force_authenticate(self.other_buyer)
+        resp = self.client.post(f"/api/payments/orders/{self.order.id}/cancel/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cancelling_frees_the_listing_for_a_new_order(self):
+        # unique_active_order_per_buyer_listing only blocks a second
+        # pending_payment/paid order -- exercises that constraint
+        # directly rather than the external-payment-calling service.
+        self.client.force_authenticate(self.buyer)
+        self.client.post(f"/api/payments/orders/{self.order.id}/cancel/")
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PENDING_PAYMENT)
+
+
 @override_settings(PLATFORM_COMMISSION_RATE=0.10)
 class FinancialReportAPITests(APITestCase):
     def setUp(self):

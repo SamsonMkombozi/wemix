@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, IntegrationCredential, Notification, PlatformSetting
+from .models import AuditLog, IntegrationCredential, Notification, PlatformSetting, StaticPage
 
 
 @admin.register(AuditLog)
@@ -38,3 +38,11 @@ class NotificationAdmin(admin.ModelAdmin):
     list_display = ("notification_type", "user", "title", "is_read", "email_sent", "created_at")
     list_filter = ("notification_type", "is_read", "email_sent")
     search_fields = ("user__username", "title")
+
+
+@admin.register(StaticPage)
+class StaticPageAdmin(admin.ModelAdmin):
+    list_display = ("slug", "title", "is_published", "updated_by", "updated_at")
+    list_filter = ("is_published",)
+    search_fields = ("slug", "title")
+    prepopulated_fields = {"slug": ("title",)}

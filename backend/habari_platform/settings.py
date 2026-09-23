@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     # third-party
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     # habari apps
     "core",
@@ -112,6 +113,12 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# django.contrib.auth.tokens.PasswordResetTokenGenerator (used by
+# accounts/views.py's password-reset endpoints) reads this directly --
+# tighter than Django's own 3-day default given this is a live financial
+# marketplace, not just a content site.
+PASSWORD_RESET_TIMEOUT = 60 * 60 * 24  # 24 hours
+
 # ------------------------------------------------------------------
 # Internationalization
 # ------------------------------------------------------------------
@@ -152,6 +159,7 @@ REST_FRAMEWORK = {
         "payment_webhook": "120/minute",
         "kyc_submit": "5/hour",
         "withdrawal_submit": "10/hour",
+        "password_reset": "5/hour",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,

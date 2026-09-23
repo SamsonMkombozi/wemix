@@ -26,15 +26,15 @@
     <div class="auth-panel-foot">&copy; 2026 WEMIX &mdash; Global News Market</div>
   </aside>
 
-  <div class="auth-form-col">
+  <main class="auth-form-col">
     <div class="auth-form-topbar">
       <a href="index.html"><img src="images/wemix.jpeg" alt="WEMIX"></a>
       <a href="index.html" class="auth-back-link">&larr; Back to marketplace</a>
     </div>
     <div class="auth-form-center">
-      <div class="card auth-form-card" style="padding:32px;">
+      <div class="card auth-form-card card-spacious">
         <h2>Create your account</h2>
-        <p class="text-muted" style="margin-top:-8px;margin-bottom:20px;">Join as a buyer, journalist, or media house.</p>
+        <p class="text-muted" style="margin-top:-8px;margin-bottom: var(--space-5);">Join as a buyer, journalist, or media house.</p>
 
     <div id="form-alert"></div>
 
@@ -68,11 +68,12 @@
       <div class="form-group">
         <label for="role">I am a&hellip;</label>
         <select id="role">
-          <option value="buyer">Buyer &mdash; I want to purchase verified news</option>
-          <option value="journalist">Journalist &mdash; I want to sell news</option>
-          <option value="seller">Seller &mdash; I want to sell news</option>
-          <option value="media_house">Media House &mdash; organization account</option>
+          <option value="buyer">Buyer</option>
+          <option value="journalist">Journalist</option>
+          <option value="seller">Seller</option>
+          <option value="media_house">Media House</option>
         </select>
+        <div class="form-hint" id="role-hint">I want to purchase verified news.</div>
       </div>
 
       <div class="form-group hidden" id="org-name-group">
@@ -91,35 +92,62 @@
       <div class="form-group">
         <label for="password">Password</label>
         <input type="password" id="password" required autocomplete="new-password">
+        <div id="strength-meter"></div>
       </div>
 
       <div class="form-group">
         <label for="password_confirm">Confirm password</label>
         <input type="password" id="password_confirm" required autocomplete="new-password">
+        <div id="match-hint" class="form-hint"></div>
       </div>
 
-      <label style="font-size:0.85rem; display:flex; align-items:flex-start; gap:8px; margin-bottom:16px;">
-        <input type="checkbox" id="terms_accepted" required style="width:auto; margin-top:3px;">
+      <label style="font-size:0.85rem; display:flex; align-items:flex-start; gap: var(--space-2); margin-bottom: var(--space-4);">
+        <input type="checkbox" id="terms_accepted" required style="width:auto; margin-top: var(--space-1);">
         <span>I have read and agree to the <a href="terms.html" target="_blank" style="color:var(--color-gold-dark); font-weight:600;">Terms &amp; Conditions</a>.</span>
       </label>
 
       <button type="submit" class="btn btn-block" id="submit-btn">Create account</button>
     </form>
 
-        <p class="text-muted" style="margin-top:18px; text-align:center; font-size:0.85rem;">
+        <p class="text-muted" style="margin-top: var(--space-5); text-align:center; font-size:0.85rem;">
           Already have an account? <a href="login.html" style="color:var(--color-gold-dark); font-weight:600;">Log in</a>
         </p>
       </div>
     </div>
-  </div>
+  </main>
 </div>
 
 <script src="js/api.js"></script>
+<script src="js/password-strength.js"></script>
 <script>
+const ROLE_HINTS = {
+  buyer: 'I want to purchase verified news.',
+  journalist: 'I want to sell news I report myself.',
+  seller: 'I want to sell news I report myself.',
+  media_house: 'Organization account for a newsroom or publisher.',
+};
+
 document.getElementById('role').addEventListener('change', (e) => {
   document.getElementById('org-name-group').classList.toggle('hidden', e.target.value !== 'media_house');
   document.getElementById('journalist-tier-group').classList.toggle('hidden', !['journalist', 'media_house'].includes(e.target.value));
+  document.getElementById('role-hint').textContent = ROLE_HINTS[e.target.value] || '';
 });
+
+const pwInput = document.getElementById('password');
+const confirmInput = document.getElementById('password_confirm');
+const meter = document.getElementById('strength-meter');
+const matchHint = document.getElementById('match-hint');
+
+renderPasswordStrengthMeter(meter, '');
+pwInput.addEventListener('input', () => renderPasswordStrengthMeter(meter, pwInput.value));
+const checkPasswordsMatch = () => {
+  if (!confirmInput.value) { matchHint.textContent = ''; return; }
+  const matches = confirmInput.value === pwInput.value;
+  matchHint.textContent = matches ? 'Passwords match.' : "Passwords don't match yet.";
+  matchHint.style.color = matches ? 'var(--color-success)' : 'var(--color-danger)';
+};
+confirmInput.addEventListener('input', checkPasswordsMatch);
+pwInput.addEventListener('input', checkPasswordsMatch);
 
 document.getElementById('register-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -144,6 +172,10 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
 
   if (!payload.terms_accepted) {
     alertBox.innerHTML = `<div class="alert alert-error">You must accept the Terms &amp; Conditions to create an account.</div>`;
+    return;
+  }
+  if (payload.password !== payload.password_confirm) {
+    alertBox.innerHTML = `<div class="alert alert-error">Passwords don't match.</div>`;
     return;
   }
 

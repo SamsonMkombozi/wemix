@@ -90,7 +90,7 @@ class OrderDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Order.objects.select_related("listing").prefetch_related("transactions")
+        qs = Order.objects.select_related("listing", "listing__seller").prefetch_related("transactions")
         if user.role in {user.Role.ADMIN, user.Role.SUPER_ADMIN} or user.is_staff:
             return qs
         return qs.filter(buyer=user)
@@ -136,6 +136,41 @@ class OrderStatusPollView(APIView):
             order = Order.objects.get(pk=id, buyer=request.user)
         except Order.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"status": order.status})
+
+
+class OrderCancelView(APIView):
+    """POST /api/payments/orders/<id>/cancel/ -- lets a buyer give up on
+    a still-pending payment from the checkout waiting screen (e.g. the
+    mobile money prompt timed out or they changed their mind). Only
+    valid from pending_payment -- an order already paid or failed is a
+    terminal state this can't undo. Cancelling frees the buyer to start
+    a fresh order for the same listing (Order.Meta's constraint only
+    blocks a second *non-terminal* order per listing/buyer)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, id=None):
+        try:
+            order = Order.objects.get(pk=id, buyer=request.user)
+        except Order.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if order.status != Order.Status.PENDING_PAYMENT:
+            return Response(
+                {"detail": f"Only a pending order can be cancelled (this one is {order.get_status_display().lower()})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order.status = Order.Status.CANCELLED
+        order.save(update_fields=["status", "updated_at"])
+
+        from core.models import AuditLog
+        from accounts.services import log_action
+
+        log_action(actor=request.user, action=AuditLog.Action.UPDATE, target_model="Order", target_id=order.id,
+                   description="Order cancelled by buyer from checkout.", request=request)
+
         return Response({"status": order.status})
 
 
