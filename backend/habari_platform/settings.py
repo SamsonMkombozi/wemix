@@ -189,6 +189,11 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 
 if not DEBUG:
+    # Behind a reverse proxy (Traefik) that terminates TLS and forwards plain
+    # HTTP internally -- without this, request.is_secure() is always False,
+    # and SECURE_SSL_REDIRECT below redirects every already-HTTPS request to
+    # itself in an infinite loop.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
