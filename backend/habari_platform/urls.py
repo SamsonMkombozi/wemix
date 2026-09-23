@@ -14,11 +14,13 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+import re
+
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve as serve_static
 
 from news.views import MarketplaceRssFeedView, MarketplaceSitemapView
 
@@ -54,11 +56,18 @@ urlpatterns = [
     path("api/", include("core.urls")),
 ]
 
-# Unconditional (not DEBUG-only): this deployment has no separate media
-# server, CDN, or object storage in front of Django -- unlike STATIC_URL
-# (served by WhiteNoise, see settings.py), nothing else serves user-uploaded
-# media (avatars, listing images, KYC documents) in production. Django's own
-# docs call this view inefficient at scale, which is a real tradeoff to
-# revisit if traffic grows, but the alternative today is every media URL
-# 404ing.
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Wired directly to django.views.static.serve rather than the usual
+# django.conf.urls.static.static() helper: that helper is hardcoded to
+# no-op whenever DEBUG is False (`elif not settings.DEBUG or ...: return []`),
+# regardless of any condition it's called under, specifically to stop people
+# from doing exactly this by accident. It's a deliberate override here, not
+# an oversight: this deployment has no separate media server, CDN, or object
+# storage in front of Django -- unlike STATIC_URL (served by WhiteNoise, see
+# settings.py), nothing else serves user-uploaded media (avatars, listing
+# images, KYC documents) in production. Django's docs call this view
+# inefficient at scale, a real tradeoff to revisit if traffic grows, but the
+# alternative today is every media URL 404ing.
+urlpatterns += [
+    re_path(r"^%s(?P<path>.*)$" % re.escape(settings.MEDIA_URL.lstrip("/")),
+            serve_static, {"document_root": settings.MEDIA_ROOT}),
+]
