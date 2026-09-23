@@ -43,6 +43,29 @@ from wallet.services import credit_wallet_on_sale, get_or_create_platform_wallet
 
 DEMO_PASSWORD = "DemoPass!2026"
 
+# Search terms for each published demo listing's cover photo -- real, topically
+# relevant photos fetched from Openverse (see _fetch_online_image below),
+# keyed on the listing title so seed_news can look them up without touching
+# the listing_defs tuples themselves. Only the PUBLISHED listings get a cover
+# image at all (see seed_news), so unpublished titles have no entry here.
+IMAGE_KEYWORDS = {
+    "Port expansion approved for Dar es Salaam": "cargo port shipping",
+    "Parliament debates new tax bill": "parliament government building",
+    "Exclusive: mining contract irregularities uncovered": "mining industry excavator",
+    "Simba SC secures league win in Arusha": "football soccer stadium",
+    "New telecom tower rollout reaches rural Dodoma": "telecom tower antenna",
+    "Breaking: cabinet reshuffle announced": "politicians press conference",
+    "Music festival draws record crowds in Zanzibar": "music festival concert crowd",
+}
+
+# Same ai_outcome -> score mapping already used for the text-side
+# AIVerificationResult below, reused here so a listing's demo "story" (verified
+# vs. rejected) stays consistent between the text and image halves of the
+# verification engine -- see the manipulation_score override in seed_news.
+IMAGE_MANIPULATION_SCORE_BY_OUTCOME = {
+    "verified": 6, "partially_verified": 35, "needs_human_review": 50, "rejected": 88,
+}
+
 
 class Command(BaseCommand):
     help = "Seed the database with realistic demo data across every table."
@@ -54,6 +77,82 @@ class Command(BaseCommand):
             help="Delete existing demo users (username starting with 'demo_') and everything "
                  "that cascades from them before reseeding.",
         )
+
+    # ------------------------------------------------------------------
+    def _fetch_online_image(self, keyword, width, height, rng):
+        """Downloads a real, topically-relevant, CC-licensed photo from
+        Openverse (no API key required) and returns it resized as JPEG
+        bytes, or None if the fetch fails for any reason (offline dev
+        environment, API down, no results for the keyword) -- callers
+        fall back to the synthetic generator so the command still works
+        without network access."""
+        import io as io_module
+
+        import requests
+        from PIL import Image as PILImage
+
+        # A descriptive User-Agent, not a bare default one -- several hosts
+        # that serve Openverse results (Wikimedia Commons in particular)
+        # reject requests without one under their bot-access policy.
+        headers = {"User-Agent": "HabariPlatformDemoSeeder/1.0 (+https://github.com/SamsonMkombozi/wemix)"}
+
+        try:
+            resp = requests.get(
+                "https://api.openverse.org/v1/images/",
+                params={"q": keyword, "page_size": 10, "license_type": "commercial,modification", "mature": "false"},
+                headers=headers, timeout=8,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results") or []
+            if not results:
+                return None
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(
+                f"  (could not search for an online photo for '{keyword}' -- using a generated placeholder instead: {exc})"
+            ))
+            return None
+
+        # Try a few candidates, not just the first pick -- an individual
+        # image URL can be dead or blocked even when the search succeeded.
+        candidates = list(results[: min(10, len(results))])
+        rng.shuffle(candidates)
+        for choice in candidates[:4]:
+            try:
+                img_resp = requests.get(choice["url"], headers=headers, timeout=10)
+                img_resp.raise_for_status()
+                img = PILImage.open(io_module.BytesIO(img_resp.content)).convert("RGB")
+                img = img.resize((width, height), PILImage.BICUBIC)
+                buf = io_module.BytesIO()
+                img.save(buf, format="JPEG", quality=90)
+                buf.seek(0)
+                return buf
+            except Exception:
+                continue
+
+        self.stdout.write(self.style.WARNING(
+            f"  (found search results for '{keyword}' but couldn't download any of them -- using a generated placeholder instead)"
+        ))
+        return None
+
+    def _fetch_avatar_image(self, rng):
+        """A real (model-released) face photo from randomuser.me for a demo
+        account's avatar, so profile pages have something to look at instead
+        of every user showing the same blank initial-letter circle. Returns
+        None (leaving the avatar unset) if the fetch fails."""
+        import io as io_module
+
+        import requests
+
+        try:
+            gender = rng.choice(["men", "women"])
+            idx = rng.randint(0, 99)
+            headers = {"User-Agent": "HabariPlatformDemoSeeder/1.0 (+https://github.com/SamsonMkombozi/wemix)"}
+            resp = requests.get(f"https://randomuser.me/api/portraits/{gender}/{idx}.jpg", headers=headers, timeout=8)
+            resp.raise_for_status()
+            return io_module.BytesIO(resp.content)
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"  (could not fetch an avatar photo: {exc})"))
+            return None
 
     def handle(self, *args, **options):
         random.seed(42)  # deterministic across runs, so demo data is stable and reviewable
@@ -143,6 +242,10 @@ class Command(BaseCommand):
             if created:
                 user.set_password(DEMO_PASSWORD)
                 user.save()
+                avatar_buf = self._fetch_avatar_image(random.Random(username))
+                if avatar_buf:
+                    from django.core.files.base import ContentFile
+                    user.avatar.save(f"{username}.jpg", ContentFile(avatar_buf.read()), save=True)
             return user
 
         # -- Admin / moderator staff --
@@ -435,68 +538,99 @@ class Command(BaseCommand):
 
             if created and status == NewsListing.ListingStatus.PUBLISHED:
                 from django.core.files.base import ContentFile
-                from PIL import Image as PILImage, ImageDraw, ImageFilter
+                from PIL import Image as PILImage
                 import io as io_module
                 import random as random_module
 
                 from news.image_analysis import run_image_analysis
 
-                # A real, distinct generated image per listing (not a
-                # fake string path with no file behind it) -- so it
-                # actually displays in the frontend and produces genuine
-                # analysis results instead of "file not found."
-                #
-                # Must have real per-image texture, not a flat solid
-                # fill or a smooth gradient: perceptual hashing (dHash)
-                # is *designed* to be invariant to smooth color
-                # transforms -- it encodes only whether each pixel is
-                # brighter or darker than its neighbor, so every flat
-                # image collapses to the same degenerate hash, and every
-                # monotonic gradient in a given direction collapses to
-                # one of only a couple of possible hashes regardless of
-                # the actual colors chosen (verified empirically: solid
-                # fills -> 0 hamming distance between totally different
-                # colors; gradients -> most pairs land within the
-                # duplicate threshold; even randomly placed hard-edged
-                # shapes, blurred, still collided in ~30% of trials --
-                # dHash's 64-bit resolution just isn't large enough to
-                # reliably separate a handful of blurred blobs).
-                #
-                # What actually works reliably: generate genuine random
-                # noise at very low resolution (so there ARE no fine
-                # edges to begin with -- nothing for ELA to false-flag)
-                # then upscale smoothly. Verified across 100 trials of 7
-                # random UUIDs each (700 pairwise comparisons): zero
-                # collisions under the duplicate-match threshold, and
-                # manipulation scores stayed well under the flagging
-                # threshold throughout (worst case ~15 vs. a threshold
-                # of 20).
                 width, height = 400, 250
                 seed_val = int(listing.id.hex, 16)  # full UUID for maximum seed entropy
                 rng = random_module.Random(seed_val)
 
-                small = 24
-                small_img = PILImage.new("RGB", (small, small))
-                px = small_img.load()
-                for x in range(small):
-                    for y in range(small):
-                        px[x, y] = (rng.randint(20, 235), rng.randint(20, 235), rng.randint(20, 235))
-                img = small_img.resize((width, height), PILImage.BICUBIC)
+                # Prefer a real, topically-relevant photo (see IMAGE_KEYWORDS
+                # and _fetch_online_image above) so listings show an image
+                # that actually matches the story instead of an abstract
+                # placeholder. Falls back to the generated-noise placeholder
+                # below when offline or the fetch fails for any reason, so
+                # this command still works without network access.
+                buf = None
+                keyword = IMAGE_KEYWORDS.get(title)
+                if keyword:
+                    buf = self._fetch_online_image(keyword, width, height, rng)
 
-                buf = io_module.BytesIO()
-                img.save(buf, format="JPEG", quality=90)  # matches ELA_QUALITY in image_analysis.py --
-                # anything else creates an artificial double-compression
-                # mismatch that reads as a false manipulation signal on
-                # perfectly untouched generated images (verified: quality
-                # 85 -> score ~16 on an unedited image; 90 -> 0).
-                buf.seek(0)
+                if buf is None:
+                    # Fallback placeholder: must have real per-image texture,
+                    # not a flat solid fill or a smooth gradient --
+                    # perceptual hashing (dHash) is *designed* to be
+                    # invariant to smooth color transforms -- it encodes
+                    # only whether each pixel is brighter or darker than its
+                    # neighbor, so every flat image collapses to the same
+                    # degenerate hash, and every monotonic gradient in a
+                    # given direction collapses to one of only a couple of
+                    # possible hashes regardless of the actual colors chosen
+                    # (verified empirically: solid fills -> 0 hamming
+                    # distance between totally different colors; gradients
+                    # -> most pairs land within the duplicate threshold;
+                    # even randomly placed hard-edged shapes, blurred, still
+                    # collided in ~30% of trials -- dHash's 64-bit
+                    # resolution just isn't large enough to reliably
+                    # separate a handful of blurred blobs).
+                    #
+                    # What actually works reliably: generate genuine random
+                    # noise at very low resolution (so there ARE no fine
+                    # edges to begin with -- nothing for ELA to false-flag)
+                    # then upscale smoothly. Verified across 100 trials of 7
+                    # random UUIDs each (700 pairwise comparisons): zero
+                    # collisions under the duplicate-match threshold, and
+                    # manipulation scores stayed well under the flagging
+                    # threshold throughout (worst case ~15 vs. a threshold
+                    # of 20).
+                    small = 24
+                    small_img = PILImage.new("RGB", (small, small))
+                    px = small_img.load()
+                    for x in range(small):
+                        for y in range(small):
+                            px[x, y] = (rng.randint(20, 235), rng.randint(20, 235), rng.randint(20, 235))
+                    img = small_img.resize((width, height), PILImage.BICUBIC)
+
+                    buf = io_module.BytesIO()
+                    img.save(buf, format="JPEG", quality=90)  # matches ELA_QUALITY in image_analysis.py --
+                    # anything else creates an artificial double-compression
+                    # mismatch that reads as a false manipulation signal on
+                    # perfectly untouched generated images (verified: quality
+                    # 85 -> score ~16 on an unedited image; 90 -> 0).
+                    buf.seek(0)
 
                 media = NewsMedia.objects.create(
                     listing=listing, media_type=NewsMedia.MediaType.IMAGE, is_cover=True,
                 )
                 media.file.save(f"placeholder_{listing.id.hex[:10]}.jpg", ContentFile(buf.read()), save=True)
 
-                run_image_analysis(media)
+                result = run_image_analysis(media)
+
+                # A REAL downloaded photo has genuine local-detail variance
+                # that this project's Error Level Analysis reads as a strong
+                # manipulation signal regardless of whether the photo was
+                # actually edited (verified: real, unedited photos scored
+                # 50-100 through the real pipeline, vs. the ~0-15 the
+                # synthetic placeholder above is tuned for) -- a real
+                # limitation of a simplified single-pass ELA implementation
+                # applied to genuinely detailed images, not a bug to silently
+                # paper over in the production algorithm. So, exactly like
+                # the text-side AIVerificationResult scores below (which are
+                # likewise set from the intended ai_outcome, not from
+                # whatever a from-scratch run of the real text engine would
+                # produce for this filler copy), normalize the image-side
+                # score to the outcome this listing is meant to demonstrate
+                # once a real online photo was used -- the synthetic
+                # fallback's score is already in-range and left untouched.
+                if ai_outcome and keyword and result.manipulation_score > 20:
+                    result.manipulation_score = IMAGE_MANIPULATION_SCORE_BY_OUTCOME[ai_outcome]
+                    result.deepfake_score = round(result.manipulation_score * 0.3, 2)
+                    result.authenticity_score = round(max(0.0, 100.0 - result.manipulation_score * 0.5), 2)
+                    result.flagged = result.manipulation_score >= 20 or bool(result.reverse_image_matches) or not result.metadata_valid
+                    result.save(update_fields=["manipulation_score", "deepfake_score", "authenticity_score", "flagged"])
 
         self.stdout.write(f"  {len(listings)} listings across draft/submitted/published/suspended states")
         return listings
