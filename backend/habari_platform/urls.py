@@ -54,5 +54,11 @@ urlpatterns = [
     path("api/", include("core.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Unconditional (not DEBUG-only): this deployment has no separate media
+# server, CDN, or object storage in front of Django -- unlike STATIC_URL
+# (served by WhiteNoise, see settings.py), nothing else serves user-uploaded
+# media (avatars, listing images, KYC documents) in production. Django's own
+# docs call this view inefficient at scale, which is a real tradeoff to
+# revisit if traffic grows, but the alternative today is every media URL
+# 404ing.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
