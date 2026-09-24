@@ -33,12 +33,17 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import IdentityVerification, LoginSession, User
-from core.models import AuditLog, PlatformSetting
+from accounts.models import CorporateVerification, IdentityVerification, LoginSession, TwoFactorRecoveryCode, User
+from core.models import APIKey, AuditLog, Notification, PlatformSetting, SupportTicket, SupportTicketMessage, TermsAcceptance
+from core.notifications import send_notification
 from moderation.models import AntiCircumventionFlag, ModerationQueueItem, UserReport, UserViolationHistory
-from news.models import AIVerificationResult, Category, ImageAnalysisResult, NewsListing, NewsMedia, Tag
-from payments.models import Order, PaymentWebhookLog, RefundRequest, SelcomTransaction
-from wallet.models import Wallet, WalletTransaction, WithdrawalRequest
+from news.models import (
+    AIVerificationResult, Bookmark, Category, Correction, Follow, ImageAnalysisResult, NewsListing,
+    NewsListingRevision, NewsMedia, Review, SavedSearch, SocialShareRecord, Tag,
+)
+from news.reviews import create_review
+from payments.models import NalaTransaction, Order, PaymentWebhookLog, RefundRequest, SelcomTransaction, Subscription, SubscriptionTransaction
+from wallet.models import CompanyPayoutAccount, CompanyWithdrawalRequest, PayoutAccount, Wallet, WalletTransaction, WithdrawalRequest
 from wallet.services import credit_wallet_on_sale, get_or_create_platform_wallet, get_or_create_user_wallet
 
 DEMO_PASSWORD = "DemoPass!2026"
@@ -166,6 +171,7 @@ class Command(BaseCommand):
             listings = self.seed_news(users, categories, tags)
             self.seed_payments_and_wallets(users, listings)
             self.seed_moderation(users, listings)
+            self.seed_engagement_and_extras(users, listings)
             self.seed_core()
 
         self.stdout.write(self.style.SUCCESS("\nDemo data seeded successfully."))
@@ -833,6 +839,311 @@ class Command(BaseCommand):
                            f"{ModerationQueueItem.objects.count()} queue items")
 
     # ------------------------------------------------------------------
+    def seed_engagement_and_extras(self, users, listings):
+        """Everything that wasn't already covered above: reviews, saved/
+        followed content, an international payment, a subscription, payout
+        accounts, support, API access, recovery codes, and a handful of
+        notifications -- the remaining tables that would otherwise sit
+        completely empty. Deliberately NOT included: core.IntegrationCredential
+        -- those rows override real provider secrets (Selcom/Nala/email) read
+        from .env at runtime (see that model's docstring), so seeding fake
+        ones here would risk silently breaking live payment/email config if
+        this command is ever run against a database with real credentials
+        configured. Skipped on purpose, not an oversight."""
+        self.stdout.write("Seeding reviews, engagement, subscriptions, and remaining tables...")
+        from django.core.files.base import ContentFile
+
+        buyers = [users[k] for k in users if k.startswith("demo_") and users[k].role == User.Role.BUYER]
+        published = [l for l in listings.values() if l.status == NewsListing.ListingStatus.PUBLISHED]
+
+        # -- An international (Nala) payment, alongside the Selcom ones --
+        # Deliberately seeded before the Reviews section below, so a fresh
+        # (post-flush) run reviews this order in the same pass instead of
+        # needing a second run to catch up. Pinned to one specific
+        # buyer+listing pair (not "the next untried one") so this stays
+        # idempotent across reruns -- a search that depends on what's
+        # already been purchased would pick a *different* listing on every
+        # subsequent run, creating a fresh Order each time.
+        nala_buyer = users["demo_peter"]
+        nala_listing = listings.get("Music festival draws record crowds in Zanzibar")
+        if nala_listing and not Order.objects.filter(buyer=nala_buyer, payment_provider=Order.PaymentProvider.NALA).exists():
+            nala_order, created = Order.objects.get_or_create(
+                buyer=nala_buyer, listing=nala_listing, status=Order.Status.PAID,
+                defaults={
+                    "amount": Decimal(str(round(float(nala_listing.price) / 2500, 2))), "currency": "USD",
+                    "payment_provider": Order.PaymentProvider.NALA,
+                    "access_granted_at": timezone.now() - timedelta(days=2),
+                },
+            )
+            if created:
+                NalaTransaction.objects.create(
+                    order=nala_order, nala_collection_id=f"NALADEMO{nala_order.id.hex[:16].upper()}",
+                    reference=f"NL-{nala_order.id.hex[:12]}-demo", channel=NalaTransaction.Channel.CARD,
+                    amount=nala_order.amount, currency="USD", status=NalaTransaction.Status.SUCCESS,
+                    nala_transaction_id=f"NALA-DEMO-{nala_order.id.hex[:8]}", completed_at=nala_order.access_granted_at,
+                )
+                credit_wallet_on_sale(nala_order)
+
+        # -- Reviews: one per paid order that doesn't have one yet --
+        review_copy = [
+            (5, "Exactly as described, and the sourcing held up when I checked it myself. Worth the price."),
+            (4, "Solid reporting. Would have liked one more source quoted directly, but credible overall."),
+            (5, "Fast-moving story, got this before it hit anywhere else. Great value."),
+            (3, "Decent, but fairly thin on detail for the price point."),
+            (4, "Good context and background, helped me understand the wider situation."),
+        ]
+        review_count = 0
+        for i, order in enumerate(Order.objects.filter(status=Order.Status.PAID).order_by("created_at")):
+            if Review.objects.filter(order=order).exists():
+                continue
+            rating, comment = review_copy[i % len(review_copy)]
+            try:
+                create_review(reviewer=order.buyer, listing=order.listing, order=order, rating=rating, comment=comment)
+                review_count += 1
+            except Exception:
+                continue  # e.g. order/buyer mismatch on a hand-crafted demo order -- skip rather than abort the whole seed
+
+        # -- Bookmarks: each buyer saves a couple of listings for later --
+        bookmark_count = 0
+        for i, buyer in enumerate(buyers):
+            for listing in published[i % len(published):i % len(published) + 2]:
+                _, created = Bookmark.objects.get_or_create(user=buyer, listing=listing)
+                bookmark_count += created
+
+        # -- Follows: buyers follow the journalists/sellers they buy from --
+        follow_count = 0
+        sellers_followed = [users[k] for k in ["demo_amina", "demo_baraka", "demo_starmedia"]]
+        for i, buyer in enumerate(buyers):
+            followed = sellers_followed[i % len(sellers_followed)]
+            _, created = Follow.objects.get_or_create(follower=buyer, followed=followed)
+            follow_count += created
+
+        # -- Saved searches --
+        SavedSearch.objects.get_or_create(
+            user=users["demo_zainab"], name="Dar es Salaam politics",
+            defaults={"category": None, "location_contains": "Dar es Salaam", "is_active": True},
+        )
+        SavedSearch.objects.get_or_create(
+            user=users["demo_john"], name="Business under 10,000 TZS", is_active=False,
+            defaults={"max_price": Decimal("10000")},
+        )
+
+        # -- A correction and a retraction on published stories --
+        correction_targets = [l for l in published if l.title in listings and l.status == NewsListing.ListingStatus.PUBLISHED]
+        if len(correction_targets) >= 2:
+            c_listing = listings.get("New telecom tower rollout reaches rural Dodoma")
+            r_listing = listings.get("Simba SC secures league win in Arusha")
+            if c_listing and not c_listing.corrections.exists():
+                Correction.objects.create(
+                    listing=c_listing, created_by=c_listing.seller, is_retraction=False,
+                    text="An earlier version of this story said twelve towers were activated this quarter; "
+                         "the operator has since confirmed the correct figure is nine, with three more "
+                         "scheduled for next quarter.",
+                )
+            if r_listing and not r_listing.corrections.exists():
+                Correction.objects.create(
+                    listing=r_listing, created_by=users["moderator1"], is_retraction=False,
+                    text="The report's final score has been corrected to 2-1; an earlier version misstated it as 3-1.",
+                )
+
+        # -- Social shares on purchased content --
+        # Provider is keyed on the fixed loop position (i), not a running
+        # "how many were newly created" counter -- using the latter meant
+        # the provider assigned to a given order could shift between runs
+        # whenever an earlier iteration didn't need to create anything,
+        # which broke idempotency (a rerun could create a second record
+        # for the same order under a different provider).
+        share_count = 0
+        share_providers = [SocialShareRecord.Provider.WHATSAPP, SocialShareRecord.Provider.X, SocialShareRecord.Provider.FACEBOOK]
+        for i, order in enumerate(Order.objects.filter(status=Order.Status.PAID).order_by("created_at")[:3]):
+            _, created = SocialShareRecord.objects.get_or_create(
+                user=order.buyer, listing=order.listing, order=order, provider=share_providers[i % 3],
+            )
+            share_count += created
+
+        # -- A listing revision (pre-edit snapshot) --
+        revision_listing = listings.get("Port expansion approved for Dar es Salaam")
+        if revision_listing and not revision_listing.revisions.exists():
+            NewsListingRevision.objects.create(
+                listing=revision_listing, edited_by=revision_listing.seller,
+                snapshot={
+                    "title": revision_listing.title,
+                    "description": "Government reviews a proposed infrastructure investment at the port.",
+                    "body": revision_listing.body,
+                    "price": str(revision_listing.price),
+                    "location": revision_listing.location,
+                },
+            )
+
+        # -- A subscription (active) + one cancelled, with transactions --
+        sub, created = Subscription.objects.get_or_create(
+            subscriber=users["demo_zainab"], seller=users["demo_amina"], status=Subscription.Status.ACTIVE,
+            defaults={"price": Decimal("15000"), "current_period_end": timezone.now() + timedelta(days=25)},
+        )
+        if created:
+            SubscriptionTransaction.objects.create(
+                subscription=sub, selcom_order_id=f"SUBDEMO{sub.id.hex[:16].upper()}",
+                reference=f"SUB-{sub.id.hex[:12]}-demo", channel=SubscriptionTransaction.Channel.MOBILE_MONEY,
+                msisdn=users["demo_zainab"].phone_number or "+255712345678", amount=sub.price, currency="TZS",
+                status=SubscriptionTransaction.Status.SUCCESS, selcom_transaction_id=f"SELCOM-SUB-DEMO-{sub.id.hex[:8]}",
+                completed_at=timezone.now() - timedelta(days=5),
+            )
+            send_notification(
+                user=sub.subscriber, notification_type=Notification.NotificationType.SUBSCRIPTION_ACTIVATED,
+                title=f"You're now subscribed to {sub.seller.username}",
+                message="You'll get every new verified story they publish for the next 30 days.",
+                link_path=f"dashboard.html?tab=subscriptions", send_email=False,
+            )
+        cancelled_sub, created = Subscription.objects.get_or_create(
+            subscriber=users["demo_john"], seller=users["demo_baraka"], status=Subscription.Status.CANCELLED,
+            defaults={"price": Decimal("12000"), "current_period_end": timezone.now() - timedelta(days=3),
+                      "cancelled_at": timezone.now() - timedelta(days=10)},
+        )
+        if created:
+            SubscriptionTransaction.objects.create(
+                subscription=cancelled_sub, selcom_order_id=f"SUBDEMOOLD{cancelled_sub.id.hex[:14].upper()}",
+                reference=f"SUB-{cancelled_sub.id.hex[:12]}-old", channel=SubscriptionTransaction.Channel.MOBILE_MONEY,
+                msisdn=users["demo_john"].phone_number or "+255712345678", amount=cancelled_sub.price, currency="TZS",
+                status=SubscriptionTransaction.Status.SUCCESS, selcom_transaction_id=f"SELCOM-SUB-OLD-{cancelled_sub.id.hex[:8]}",
+                completed_at=timezone.now() - timedelta(days=33),
+            )
+
+        # -- Seller payout accounts, mirroring the KYC verified/pending/rejected spread --
+        payout_defs = [
+            ("demo_amina", PayoutAccount.Status.VERIFIED, "M-Pesa"),
+            ("demo_baraka", PayoutAccount.Status.PENDING, "Tigo Pesa"),
+            ("demo_grace", PayoutAccount.Status.REJECTED, "Airtel Money"),
+        ]
+        for seller_key, status, provider in payout_defs:
+            seller = users[seller_key]
+            account, created = PayoutAccount.objects.get_or_create(
+                user=seller, account_number=seller.phone_number or "+255712345678",
+                defaults={
+                    "account_type": PayoutAccount.AccountType.MOBILE_MONEY, "provider": provider,
+                    "account_name": f"{seller.first_name} {seller.last_name}".strip() or seller.username,
+                    "is_default": True, "status": status,
+                    "reviewed_by": users["moderator1"] if status != PayoutAccount.Status.PENDING else None,
+                    "reviewed_at": timezone.now() if status != PayoutAccount.Status.PENDING else None,
+                    "rejection_reason": "Registered name does not match KYC name on file." if status == PayoutAccount.Status.REJECTED else "",
+                },
+            )
+
+        # -- Company (platform treasury) payout account + one withdrawal request --
+        company_account, _ = CompanyPayoutAccount.objects.get_or_create(
+            account_number="0150-DEMO-TREASURY-001",
+            defaults={
+                "account_type": PayoutAccount.AccountType.BANK_ACCOUNT, "provider": "CRDB Bank",
+                "account_name": "WEMIX Ltd", "is_active": True, "added_by": users["super_admin"],
+            },
+        )
+        platform_wallet = get_or_create_platform_wallet()
+        if platform_wallet.balance > 0:
+            CompanyWithdrawalRequest.objects.get_or_create(
+                payout_account=company_account, reason="Monthly commission sweep to company treasury.",
+                defaults={
+                    "amount": min(platform_wallet.balance, Decimal("10000")),
+                    "requested_by": users["admin"], "status": CompanyWithdrawalRequest.Status.REQUESTED,
+                },
+            )
+
+        # -- 2FA recovery codes for the one demo account with 2FA enabled --
+        import hashlib
+
+        two_fa_user = users["demo_john"]
+        if not TwoFactorRecoveryCode.objects.filter(user=two_fa_user).exists():
+            for i in range(5):
+                code = f"DEMO-{two_fa_user.id.hex[:4].upper()}-{i}"
+                TwoFactorRecoveryCode.objects.create(
+                    user=two_fa_user, code_hash=hashlib.sha256(code.encode()).hexdigest(),
+                    used_at=timezone.now() - timedelta(days=1) if i == 0 else None,
+                )
+
+        # -- A corporate (KYB) verification for a buyer acting on behalf of an org --
+        corp_buyer = users["demo_zainab"]
+        if not CorporateVerification.objects.filter(user=corp_buyer).exists():
+            doc_text = (
+                "WEMIX DEMO -- placeholder business document, not a real filing.\n"
+                "This file exists only so the CorporateVerification demo row has real, "
+                "viewable attachments instead of empty FileFields."
+            )
+            corp = CorporateVerification(
+                user=corp_buyer, company_name="Zainab Media Consulting", status=CorporateVerification.Status.PENDING,
+            )
+            corp.business_license.save("business_license_demo.txt", ContentFile(doc_text.encode()), save=False)
+            corp.company_registration.save("company_registration_demo.txt", ContentFile(doc_text.encode()), save=False)
+            corp.save()
+
+        # -- A support ticket with a staff reply thread --
+        ticket, created = SupportTicket.objects.get_or_create(
+            user=users["demo_fatuma"], subject="Refund not received after 5 days",
+            defaults={
+                "category": SupportTicket.Category.REFUND_HELP,
+                "message": "I requested a refund last week for a story that didn't match its description. "
+                            "It's been five days and I haven't seen the money back in my wallet. Can someone check?",
+                "status": SupportTicket.Status.IN_PROGRESS, "assigned_to": users["moderator2"],
+            },
+        )
+        if created:
+            SupportTicketMessage.objects.create(
+                ticket=ticket, author=users["moderator2"], is_staff_reply=True,
+                message="Thanks for flagging this -- I can see your refund request in the queue, it's been "
+                        "approved and is processing on our end. It should reflect in your wallet within 24 hours.",
+            )
+            SupportTicketMessage.objects.create(
+                ticket=ticket, author=users["demo_fatuma"], is_staff_reply=False,
+                message="Got it, thank you for the quick response!",
+            )
+            send_notification(
+                user=ticket.user, notification_type=Notification.NotificationType.SUPPORT_TICKET_REPLY,
+                title="New reply on your support ticket", message="A moderator replied to \"Refund not received after 5 days\".",
+                link_path="dashboard.html?tab=support", send_email=False,
+            )
+
+        # -- An API key for a media house doing programmatic ingest --
+        media_house = users["demo_starmedia"]
+        if not APIKey.objects.filter(user=media_house, name="Newsroom ingest script").exists():
+            APIKey.create_for_user(media_house, "Newsroom ingest script")
+
+        # -- Terms acceptance, one per demo user --
+        from django.conf import settings as django_settings
+
+        terms_count = 0
+        for user in users.values():
+            _, created = TermsAcceptance.objects.get_or_create(
+                user=user, version=django_settings.TERMS_VERSION, defaults={"ip_address": "41.222.10.5"},
+            )
+            terms_count += created
+
+        # -- A handful of extra notifications covering event types reviews don't --
+        notif_defs = [
+            (users["demo_amina"], Notification.NotificationType.KYC_APPROVED, "Your identity verification was approved",
+             "You can now sell news on WEMIX.", "dashboard.html?tab=verification", True),
+            (users["demo_amina"], Notification.NotificationType.LISTING_APPROVED, "Your listing was approved",
+             "\"Port expansion approved for Dar es Salaam\" is now live and purchasable.", "dashboard.html?tab=listings", True),
+            (users["demo_grace"], Notification.NotificationType.SALE_COMPLETED, "You made a sale",
+             "Someone just purchased \"New telecom tower rollout reaches rural Dodoma\".", "dashboard.html?tab=listings", False),
+            (users["demo_amina"], Notification.NotificationType.WITHDRAWAL_COMPLETED, "Withdrawal completed",
+             "Your withdrawal has been sent to your registered mobile money account.", "dashboard.html?tab=withdrawals", True),
+            (users["demo_hamisi"], Notification.NotificationType.MODERATION_ACTION, "Your account was suspended",
+             "A moderator has temporarily suspended your account for a platform policy violation.", "dashboard.html", False),
+        ]
+        notif_count = 0
+        for user, ntype, title, message, link_path, is_read in notif_defs:
+            if Notification.objects.filter(user=user, notification_type=ntype, title=title).exists():
+                continue
+            n = send_notification(user=user, notification_type=ntype, title=title, message=message, link_path=link_path, send_email=False)
+            if is_read:
+                n.is_read = True
+                n.read_at = timezone.now()
+                n.save(update_fields=["is_read", "read_at"])
+            notif_count += 1
+
+        self.stdout.write(
+            f"  {review_count} reviews, {bookmark_count} bookmarks, {follow_count} follows, "
+            f"{share_count} social shares, {terms_count} terms acceptances, {notif_count} extra notifications"
+        )
+
+    # ------------------------------------------------------------------
     def seed_core(self):
         self.stdout.write("Seeding platform settings...")
         settings_defs = [
@@ -859,25 +1170,45 @@ class Command(BaseCommand):
             ("Users", User.objects.count()),
             ("  - Identity verifications", IdentityVerification.objects.count()),
             ("  - Login sessions", LoginSession.objects.count()),
+            ("  - Two-factor recovery codes", TwoFactorRecoveryCode.objects.count()),
+            ("  - Corporate (KYB) verifications", CorporateVerification.objects.count()),
             ("Categories", Category.objects.count()),
             ("Tags", Tag.objects.count()),
             ("News listings", NewsListing.objects.count()),
             ("  - AI verification results", AIVerificationResult.objects.count()),
             ("  - Media", NewsMedia.objects.count()),
             ("  - Image analysis results", ImageAnalysisResult.objects.count()),
+            ("  - Listing revisions", NewsListingRevision.objects.count()),
+            ("  - Reviews", Review.objects.count()),
+            ("  - Bookmarks", Bookmark.objects.count()),
+            ("  - Follows", Follow.objects.count()),
+            ("  - Saved searches", SavedSearch.objects.count()),
+            ("  - Corrections", Correction.objects.count()),
+            ("  - Social share records", SocialShareRecord.objects.count()),
             ("Orders", Order.objects.count()),
             ("  - Selcom transactions", SelcomTransaction.objects.count()),
+            ("  - Nala (international) transactions", NalaTransaction.objects.count()),
             ("  - Webhook logs", PaymentWebhookLog.objects.count()),
             ("  - Refund requests", RefundRequest.objects.count()),
+            ("Subscriptions", Subscription.objects.count()),
+            ("  - Subscription transactions", SubscriptionTransaction.objects.count()),
             ("Wallets", Wallet.objects.count()),
             ("  - Wallet transactions (ledger entries)", WalletTransaction.objects.count()),
             ("  - Withdrawal requests", WithdrawalRequest.objects.count()),
+            ("  - Seller payout accounts", PayoutAccount.objects.count()),
+            ("  - Company payout accounts", CompanyPayoutAccount.objects.count()),
+            ("  - Company withdrawal requests", CompanyWithdrawalRequest.objects.count()),
             ("Anti-circumvention flags", AntiCircumventionFlag.objects.count()),
             ("User violation histories", UserViolationHistory.objects.count()),
             ("User reports", UserReport.objects.count()),
             ("Moderation queue items", ModerationQueueItem.objects.count()),
             ("Platform settings", PlatformSetting.objects.count()),
             ("Audit log entries", AuditLog.objects.count()),
+            ("Support tickets", SupportTicket.objects.count()),
+            ("  - Support ticket messages", SupportTicketMessage.objects.count()),
+            ("API keys", APIKey.objects.count()),
+            ("Terms acceptances", TermsAcceptance.objects.count()),
+            ("Notifications", Notification.objects.count()),
         ]
         self.stdout.write("\nTable counts after seeding:")
         for label, count in rows:
