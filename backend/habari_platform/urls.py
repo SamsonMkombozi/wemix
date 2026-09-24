@@ -28,7 +28,7 @@ from news.views import MarketplaceRssFeedView, MarketplaceSitemapView
 def api_root(request):
     return JsonResponse(
         {
-            "service": "Habari Platform API",
+            "service": "WEMIX API",
             "status": "ok",
             "endpoints": {
                 "admin": "/admin/",

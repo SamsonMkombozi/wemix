@@ -1,11 +1,11 @@
 /* ==========================================================================
    WEMIX / Habari Platform — design tokens
-   Black / white / gold editorial identity -- matching the actual wordmark
-   (images/wemix.jpeg: black tiles, white letters, one gold tile) rather
-   than the navy/blue/red palette this file drifted to at one point. One
-   brand across every screen: this file, index.html's scoped homepage
-   styles, and the shared header logo (js/nav.js) all resolve to the same
-   three hues plus white/black neutrals.
+   Black / white / gold editorial identity -- matching the "WEMIX." text
+   wordmark (.wemix-wordmark, below) rather than the navy/blue/red palette
+   this file drifted to at one point. One brand across every screen: this
+   file, index.html's scoped homepage styles, and the shared header
+   wordmark (js/nav.js) all resolve to the same three hues plus
+   white/black neutrals.
    Custom property NAMES are kept as-is (--color-gold, --color-black, ...)
    since every component references them by name; only their VALUES and,
    where a component paired a fill + text color in a way that doesn't

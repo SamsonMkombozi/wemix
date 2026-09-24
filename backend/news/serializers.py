@@ -395,7 +395,7 @@ class NewsListingDetailSerializer(serializers.ModelSerializer):
         # falls back to the watermarked `preview_file` a media_preview
         # generates on upload (blank for video/document, which have no
         # preview asset -- those are withheld outright, not substituted).
-        items = NewsMediaSerializer(obj.media.all(), many=True).data
+        items = NewsMediaSerializer(obj.media.all(), many=True, context=self.context).data
         if self._has_access(obj):
             return items
         for item in items:

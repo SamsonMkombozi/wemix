@@ -383,7 +383,7 @@ class NewsListingViewSet(viewsets.ModelViewSet):
         # generated preview_file instead of the pre-task blank value.
         media_obj.refresh_from_db()
 
-        return Response(NewsMediaSerializer(media_obj).data, status=status.HTTP_201_CREATED)
+        return Response(NewsMediaSerializer(media_obj, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="ai-results")
     def ai_results(self, request, slug=None):

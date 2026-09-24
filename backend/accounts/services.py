@@ -50,7 +50,7 @@ def send_password_reset_email(user, uid: str, token: str) -> None:
 def send_verification_email(user) -> None:
     token = make_email_verification_token(user)
     verify_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/verify-email?token={token}"
-    subject = "Verify your Habari Platform account"
+    subject = "Verify your WEMIX account"
     text_body = (
         f"Hello {user.get_full_name() or user.username},\n\n"
         f"Please verify your email address by opening the link below:\n{verify_url}\n\n"

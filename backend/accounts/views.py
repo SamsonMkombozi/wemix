@@ -64,7 +64,7 @@ class RegisterView(generics.CreateAPIView):
         )
         return Response(
             {
-                "user": UserSerializer(user).data,
+                "user": UserSerializer(user, context={"request": request}).data,
                 "detail": "Account created. Check your email to verify your address.",
             },
             status=status.HTTP_201_CREATED,
@@ -157,7 +157,7 @@ class ExportMyDataView(APIView):
 
         data = {
             "exported_at": timezone.now().isoformat(),
-            "profile": UserSerializer(user).data,
+            "profile": UserSerializer(user, context={"request": request}).data,
             "identity_verifications": as_list(
                 user.identity_verifications.all(), ["id", "id_type", "status", "created_at"]
             ),
@@ -530,7 +530,7 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
             actor=request.user, action=AuditLog.Action.UPDATE, target_model="User", target_id=target_user.id,
             description=f"Profile fields edited by admin: {changed}", request=request,
         )
-        return Response(ModeratorUserSerializer(target_user).data)
+        return Response(ModeratorUserSerializer(target_user, context={"request": request}).data)
 
 
 class UserModerateView(APIView):
@@ -561,7 +561,7 @@ class UserModerateView(APIView):
             request=request,
         )
         target_user.refresh_from_db()
-        return Response(ModeratorUserSerializer(target_user).data)
+        return Response(ModeratorUserSerializer(target_user, context={"request": request}).data)
 
 
 class UserForceDeactivateView(APIView):
@@ -586,7 +586,7 @@ class UserForceDeactivateView(APIView):
             description="Account force-deactivated by moderator.", request=request,
         )
         target_user.refresh_from_db()
-        return Response(ModeratorUserSerializer(target_user).data)
+        return Response(ModeratorUserSerializer(target_user, context={"request": request}).data)
 
 
 class UserSetPasswordView(APIView):
@@ -680,4 +680,4 @@ class UserReverseStatusView(APIView):
             description=f"Status reversed: {action}.", request=request,
         )
         target_user.refresh_from_db()
-        return Response(ModeratorUserSerializer(target_user).data)
+        return Response(ModeratorUserSerializer(target_user, context={"request": request}).data)

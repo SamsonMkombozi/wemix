@@ -372,7 +372,7 @@ class IdentityVerificationReviewSerializer(serializers.ModelSerializer):
             send_notification(
                 user=instance.user, notification_type=Notification.NotificationType.KYC_APPROVED,
                 title="Your identity verification was approved",
-                message="You can now sell news on Habari Platform.",
+                message="You can now sell news on WEMIX.",
                 link_path="dashboard.html?tab=verification",
             )
         else:
@@ -396,7 +396,7 @@ class Enable2FASerializer(serializers.Serializer):
         # Stored but is_2fa_enabled stays False until Confirm2FASerializer succeeds.
         user.totp_secret = secret
         user.save(update_fields=["totp_secret"])
-        uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user.email, issuer_name="Habari Platform")
+        uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user.email, issuer_name="WEMIX")
         return {"secret": secret, "provisioning_uri": uri}
 
 
@@ -524,5 +524,5 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             if not pyotp.TOTP(user.totp_secret).verify(two_factor_code, valid_window=1):
                 raise serializers.ValidationError({"two_factor_code": "Invalid two-factor code."})
 
-        data["user"] = UserSerializer(user).data
+        data["user"] = UserSerializer(user, context=self.context).data
         return data

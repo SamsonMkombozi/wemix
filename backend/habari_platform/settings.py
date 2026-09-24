@@ -1,5 +1,5 @@
 """
-Django settings for the Habari Platform project.
+Django settings for the WEMIX (Habari Platform) project.
 
 Environment-driven configuration: every value that changes between
 local/staging/production is read from the environment (via a .env file
@@ -312,7 +312,7 @@ EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Habari Platform <no-reply@habariplatform.co.tz>")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="WEMIX <no-reply@wemixglobal.com>")
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 
 # ------------------------------------------------------------------

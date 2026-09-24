@@ -75,7 +75,7 @@ def _send_notification_email(user, title: str, message: str, link_path: str) -> 
         from .credentials import get_effective_from_email, get_email_connection
 
         send_mail(
-            subject=f"Habari Platform: {title}",
+            subject=f"WEMIX: {title}",
             message="\n".join(body_lines),
             from_email=get_effective_from_email(),
             recipient_list=[user.email],

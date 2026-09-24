@@ -11,7 +11,7 @@ class UserAdmin(DjangoUserAdmin):
     search_fields = ("username", "email", "phone_number")
     fieldsets = DjangoUserAdmin.fieldsets + (
         (
-            "Habari Platform",
+            "WEMIX",
             {
                 "fields": (
                     "role",

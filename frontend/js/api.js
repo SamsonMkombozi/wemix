@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Habari Platform — API client
+   WEMIX — API client
    Talks to the Django backend. Change API_BASE_URL if the backend isn't
    running on localhost:8000.
    ========================================================================== */

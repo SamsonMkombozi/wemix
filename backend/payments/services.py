@@ -133,7 +133,7 @@ def create_nala_collection_and_initiate_payment(*, buyer, listing: NewsListing, 
             reference=reference,
             amount=order.amount,
             currency=currency,
-            description=f"Habari Platform: {listing.title[:100]}",
+            description=f"WEMIX: {listing.title[:100]}",
             webhook_url=settings.NALA_WEBHOOK_URL,
         )
     except NalaAPIError as exc:
