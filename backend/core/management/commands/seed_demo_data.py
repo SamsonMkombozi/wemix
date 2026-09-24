@@ -707,16 +707,24 @@ class Command(BaseCommand):
                     verdict=PaymentWebhookLog.Verdict.UNKNOWN_ORDER, source_ip="196.192.10.1",
                 )
 
-        # A refund request on one paid order
-        paid_orders = list(Order.objects.filter(status=Order.Status.PAID)[:1])
-        if paid_orders:
-            RefundRequest.objects.get_or_create(
-                order=paid_orders[0],
-                defaults={
-                    "requested_by": paid_orders[0].buyer, "reason": "Content did not match the description.",
-                    "amount": paid_orders[0].amount, "status": RefundRequest.Status.REQUESTED,
-                },
-            )
+        # A refund request on one paid order. Guarded on "does a demo refund
+        # request exist AT ALL" rather than re-picking "the first paid
+        # order" every run -- the latter isn't a stable identity: as soon
+        # as any newer paid order exists (another seed run adding one, or
+        # real production sales happening between reseeds), "first by
+        # -created_at" points at a different order and get_or_create(order=...)
+        # creates a second, unrelated RefundRequest instead of recognizing
+        # the demo data already exists. Empirically confirmed: this created
+        # a spurious extra RefundRequest between two back-to-back
+        # production runs before this fix.
+        if not RefundRequest.objects.exists():
+            paid_orders = list(Order.objects.filter(status=Order.Status.PAID)[:1])
+            if paid_orders:
+                RefundRequest.objects.create(
+                    order=paid_orders[0], requested_by=paid_orders[0].buyer,
+                    reason="Content did not match the description.",
+                    amount=paid_orders[0].amount, status=RefundRequest.Status.REQUESTED,
+                )
 
         # Withdrawal requests in various states for sellers who earned something.
         # Guarantee each of these three sellers has at least one paid sale first,
