@@ -801,6 +801,22 @@ class MediaPaywallTests(APITestCase):
         self.media_id = upload_resp.data["id"]
         self.client.force_authenticate(None)
 
+    def test_cover_image_preview_is_cropped_to_standard_dimension(self):
+        # The 20x20 square source (make_real_jpeg_bytes) is nowhere near
+        # 16:9 -- confirms the cover preview is actually center-cropped +
+        # resized to the fixed COVER_TARGET_SIZE, not just proportionally
+        # thumbnailed like a non-cover gallery image would be.
+        from PIL import Image
+
+        from .media_preview import COVER_TARGET_SIZE
+        from .models import NewsMedia
+
+        media = NewsMedia.objects.get(pk=self.media_id)
+        self.assertTrue(media.preview_file)
+        with media.preview_file.open("rb") as f:
+            img = Image.open(f)
+            self.assertEqual(img.size, COVER_TARGET_SIZE)
+
     def test_anonymous_visitor_never_sees_the_full_resolution_file(self):
         from .models import NewsMedia
 
@@ -866,6 +882,14 @@ class DownloadAndSocialShareAccessTests(APITestCase):
     def setUp(self):
         self.seller = make_seller()
         self.buyer = make_buyer()
+        # Facebook/X sharing is gated on having linked that platform's
+        # account (see news/views.py social_share) -- most tests here are
+        # about the purchase gate and per-provider response shape, not
+        # about that separate gate, so this buyer has both linked by
+        # default. SocialShareLinkedAccountGateTests below covers the gate itself.
+        self.buyer.facebook_url = "https://facebook.com/testbuyer"
+        self.buyer.twitter_url = "https://x.com/testbuyer"
+        self.buyer.save()
         self.other_buyer = make_buyer("otherbuyer")
         self.listing = NewsListing.objects.create(
             seller=self.seller, title="t", description="d", body="b", news_type=NewsListing.NewsType.TEXT,
@@ -926,3 +950,40 @@ class DownloadAndSocialShareAccessTests(APITestCase):
         for provider in ["facebook", "telegram", "email", "copy_link", "instagram"]:
             self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": provider})
         self.assertEqual(SocialShareRecord.objects.filter(listing=self.listing, user=self.buyer).count(), 5)
+
+
+class SocialShareLinkedAccountGateTests(APITestCase):
+    """Facebook/X sharing is restricted to a buyer's own linked account for
+    that platform (User.facebook_url/twitter_url) -- providers without a
+    linkable field (linkedin/whatsapp/telegram/email/copy_link/instagram/
+    tiktok/youtube) are unaffected."""
+
+    def setUp(self):
+        self.seller = make_seller()
+        self.buyer = make_buyer()  # no facebook_url/twitter_url set
+        self.listing = NewsListing.objects.create(
+            seller=self.seller, title="t", description="d", body="b", news_type=NewsListing.NewsType.TEXT,
+            category=make_category(), price=Decimal("1000"), status=NewsListing.ListingStatus.PUBLISHED,
+            verification_status=NewsListing.VerificationStatus.VERIFIED,
+        )
+        Order.objects.create(buyer=self.buyer, listing=self.listing, amount=self.listing.price, status=Order.Status.PAID)
+        self.client.force_authenticate(self.buyer)
+
+    def test_facebook_share_blocked_without_linked_account(self):
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "facebook"})
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Facebook", str(resp.data))
+
+    def test_x_share_blocked_without_linked_account(self):
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "x"})
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_facebook_share_allowed_once_linked(self):
+        self.buyer.facebook_url = "https://facebook.com/me"
+        self.buyer.save()
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "facebook"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_linkedin_share_unaffected_by_gate(self):
+        resp = self.client.post(f"/api/news/listings/{self.listing.slug}/social-share/", {"provider": "linkedin"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)

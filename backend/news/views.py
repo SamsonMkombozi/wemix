@@ -623,6 +623,24 @@ class NewsListingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # For the two platforms a user can actually link an account for on
+        # their profile (User.twitter_url/facebook_url -- see the "Edit
+        # profile" form in js/nav.js), sharing is restricted to that one
+        # linked account, matching "share to only one linked account per
+        # platform" -- there's no real OAuth app for the rest of the
+        # provider list (see this action's docstring), so there's nothing
+        # to link/restrict there yet.
+        LINKED_ACCOUNT_FIELD = {
+            SocialShareRecord.Provider.FACEBOOK: "facebook_url",
+            SocialShareRecord.Provider.X: "twitter_url",
+        }
+        if provider in LINKED_ACCOUNT_FIELD and not getattr(user, LINKED_ACCOUNT_FIELD[provider]):
+            platform_label = dict(SocialShareRecord.Provider.choices)[provider]
+            return Response(
+                {"detail": f"Link your {platform_label} account in your profile before sharing to {platform_label}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         SocialShareRecord.objects.create(user=user, listing=listing, order=order, provider=provider)
 
         listing_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/listing.html?slug={listing.slug}"

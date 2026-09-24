@@ -28,6 +28,38 @@ logger = logging.getLogger("habari.media_preview")
 PREVIEW_MAX_DIMENSION = 900
 WATERMARK_TEXT = "WEMIX PREVIEW — PURCHASE TO UNLOCK"
 
+# Cover images are what every listing card/hero banner across the site
+# actually displays (NewsListingSerializer.get_cover_image prefers
+# preview_file), so unlike other gallery images they're cropped to one
+# fixed aspect ratio here -- a seller can upload any size/shape source and
+# every listing still shows a consistent, predictable cover, matching how
+# every real marketplace/wire-photo site standardizes card imagery. The
+# original file a paying buyer downloads is never touched -- only this
+# derived preview copy is cropped.
+COVER_TARGET_SIZE = (1200, 675)  # 16:9, matches the hero/card widescreen convention
+
+
+def _crop_to_fill(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Center-crops `image` to the target aspect ratio, then resizes to
+    exactly target_w x target_h -- the same "cover" behavior CSS
+    object-fit: cover gives in the browser, done once server-side so the
+    stored preview is already the standard size instead of relying on the
+    viewport to crop an arbitrarily-shaped image down every time."""
+    src_w, src_h = image.size
+    target_ratio = target_w / target_h
+    src_ratio = src_w / src_h
+    if src_ratio > target_ratio:
+        # Source is wider than target -- crop the sides.
+        new_w = int(src_h * target_ratio)
+        left = (src_w - new_w) // 2
+        image = image.crop((left, 0, left + new_w, src_h))
+    elif src_ratio < target_ratio:
+        # Source is taller than target -- crop top/bottom.
+        new_h = int(src_w / target_ratio)
+        top = (src_h - new_h) // 2
+        image = image.crop((0, top, src_w, top + new_h))
+    return image.resize((target_w, target_h), Image.LANCZOS)
+
 
 def generate_preview(media: NewsMedia) -> None:
     """Populates media.preview_file with a downsampled, watermarked copy
@@ -49,7 +81,10 @@ def generate_preview(media: NewsMedia) -> None:
 
     try:
         rgb = image.convert("RGB")
-        rgb.thumbnail((PREVIEW_MAX_DIMENSION, PREVIEW_MAX_DIMENSION), Image.LANCZOS)
+        if media.is_cover:
+            rgb = _crop_to_fill(rgb, *COVER_TARGET_SIZE)
+        else:
+            rgb.thumbnail((PREVIEW_MAX_DIMENSION, PREVIEW_MAX_DIMENSION), Image.LANCZOS)
         width, height = rgb.size
 
         # Tiled, rotated watermark: draw the label repeatedly onto a

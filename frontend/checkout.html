@@ -88,7 +88,7 @@ async function cancelOrder(btn) {
   }
 }
 
-function showResult(orderStatus) {
+function showResult(orderStatus, failureReason) {
   clearInterval(pollTimer);
   if (orderStatus === 'paid') {
     content.innerHTML = `
@@ -102,7 +102,7 @@ function showResult(orderStatus) {
     content.innerHTML = `
       ${progressHtml(2)}
       <h2 style="color:var(--color-danger);">Payment failed</h2>
-      <p class="text-muted">The payment did not complete.</p>
+      <p class="text-muted">${escapeHtml(failureReason || 'The payment did not complete.')}</p>
       ${summaryHtml()}
       <div style="display:flex; gap: var(--space-2); justify-content:center; flex-wrap:wrap; margin-top: var(--space-2);">
         ${backToListingBtn('Retry payment')}
@@ -163,7 +163,7 @@ async function poll() {
   try {
     const data = await apiFetch(`/api/payments/orders/${encodeURIComponent(orderId)}/status/`);
     if (data.status === 'paid' || data.status === 'failed' || data.status === 'cancelled') {
-      showResult(data.status);
+      showResult(data.status, data.failure_reason);
     } else if (pollCount > 40) {
       showResult('timeout');
     }

@@ -31,14 +31,27 @@ class ModeratorOrderSerializer(serializers.ModelSerializer):
     listing_slug = serializers.CharField(source="listing.slug", read_only=True)
     buyer_username = serializers.CharField(source="buyer.username", read_only=True)
     seller_username = serializers.CharField(source="listing.seller.username", read_only=True)
+    failure_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             "id", "listing", "listing_title", "listing_slug", "buyer_username", "seller_username",
             "amount", "currency", "status", "payment_provider", "access_granted_at", "created_at",
+            "failure_reason",
         ]
         read_only_fields = fields
+
+    def get_failure_reason(self, obj):
+        if obj.status != Order.Status.FAILED:
+            return ""
+        last_selcom = obj.transactions.order_by("-created_at").first()
+        last_nala = obj.nala_transactions.order_by("-created_at").first()
+        last = max(
+            [t for t in (last_selcom, last_nala) if t is not None],
+            key=lambda t: t.created_at, default=None,
+        )
+        return (last.failure_reason if last else "") or "Payment was not completed."
 
 
 class OrderSerializer(serializers.ModelSerializer):

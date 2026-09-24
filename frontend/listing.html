@@ -321,6 +321,11 @@ function renderListing(listing) {
     ['telegram', 'Telegram'], ['email', 'Email'], ['copy_link', 'Copy Link'],
     ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'],
   ];
+  // Facebook/X sharing is restricted server-side to the buyer's own
+  // linked account for that platform (see news/views.py social_share) --
+  // reflect that here instead of only letting the click fail with a 400.
+  const LINKED_ACCOUNT_FIELD = { facebook: 'facebook_url', x: 'twitter_url' };
+  const isProviderLinked = (id) => !LINKED_ACCOUNT_FIELD[id] || !!(user && user[LINKED_ACCOUNT_FIELD[id]]);
 
   content.innerHTML = `
     ${heroHtml}
@@ -351,8 +356,12 @@ function renderListing(listing) {
             <h4 style="margin: 0 0 var(--space-3) 0;">Share this story</h4>
             <p class="text-muted" style="margin-top:-6px; font-size:0.8rem;">Facebook, X, LinkedIn, WhatsApp and Telegram open a real share dialog; Email drafts a message. Instagram, TikTok and YouTube don't offer a direct-post link without a registered developer app, so those give you a ready-to-paste caption instead.</p>
             <div style="display:flex; flex-wrap:wrap; gap: var(--space-2);">
-              ${SOCIAL_PROVIDERS.map(([id, label]) => `<button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="${id}">${escapeHtml(label)}</button>`).join('')}
+              ${SOCIAL_PROVIDERS.map(([id, label]) => isProviderLinked(id)
+                ? `<button class="btn btn-outline btn-sm social-share-btn" data-slug="${listing.slug}" data-provider="${id}">${escapeHtml(label)}</button>`
+                : `<button class="btn btn-outline btn-sm" disabled title="Link your ${escapeHtml(label)} account in your profile to share here">${escapeHtml(label)} &#128279;</button>`
+              ).join('')}
             </div>
+            ${(!isProviderLinked('facebook') || !isProviderLinked('x')) ? `<p class="text-muted" style="font-size:0.78rem; margin-top: var(--space-2);">Link your Facebook/X account from the profile menu (top right) to unlock sharing to those platforms.</p>` : ''}
             <div id="social-share-result" style="margin-top: var(--space-3);"></div>
           </div>
         ` : ''}

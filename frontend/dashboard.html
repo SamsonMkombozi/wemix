@@ -203,7 +203,7 @@ const TZ_WARDS = {
    region -- so old data isn't discarded, just not parsed into the
    hierarchy. Shared between the seller create-listing form and the
    listing edit form. */
-function mountLocationPicker(container, hiddenId, currentValue) {
+function mountLocationPicker(container, hiddenId, currentValue, datelineInputId) {
   const regions = Object.keys(TZ_LOCATIONS);
   let prefillRegion = '';
   let prefillDistrict = '';
@@ -270,15 +270,42 @@ function mountLocationPicker(container, hiddenId, currentValue) {
   populateDistricts(prefillDistrict);
   populateWards(prefillWard);
 
-  const syncHidden = () => {
+  // Auto-fills the dateline field's location portion from whatever's
+  // picked here, so a seller doesn't have to type the same place name
+  // twice (once for location, again for the wire-style dateline). Only
+  // overwrites it while the seller hasn't customized it themselves --
+  // tracked via lastAutoDateline, so a deliberate manual edit always wins.
+  const datelineInput = datelineInputId ? document.getElementById(datelineInputId) : null;
+  let lastAutoDateline = datelineInput ? datelineInput.value : '';
+  if (datelineInput) {
+    datelineInput.addEventListener('input', () => {
+      if (datelineInput.value !== lastAutoDateline) lastAutoDateline = '__manually_edited__';
+    });
+  }
+  const syncDateline = () => {
+    if (!datelineInput) return;
+    if (datelineInput.value !== lastAutoDateline) return; // seller has typed their own dateline -- leave it alone
+    const place = (cityInput.value.trim() || districtSelect.value || regionSelect.value || '').toUpperCase();
+    if (!place) return;
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const next = `${place}, ${dateStr}`;
+    datelineInput.value = next;
+    lastAutoDateline = next;
+  };
+
+  const syncHidden = (touchDateline) => {
     const bits = [cityInput.value.trim(), wardSelect.value, districtSelect.value, regionSelect.value].filter(Boolean);
     hiddenInput.value = bits.join(', ');
+    if (touchDateline) syncDateline();
   };
-  regionSelect.addEventListener('change', () => { populateDistricts(''); populateWards(''); syncHidden(); });
-  districtSelect.addEventListener('change', () => { populateWards(''); syncHidden(); });
-  wardSelect.addEventListener('change', syncHidden);
-  cityInput.addEventListener('input', syncHidden);
-  syncHidden();
+  // Only auto-fill dateline in response to the seller actually changing a
+  // location field from here on -- not on the initial mount, which would
+  // otherwise clobber an existing dateline already saved on this listing.
+  regionSelect.addEventListener('change', () => { populateDistricts(''); populateWards(''); syncHidden(true); });
+  districtSelect.addEventListener('change', () => { populateWards(''); syncHidden(true); });
+  wardSelect.addEventListener('change', () => syncHidden(true));
+  cityInput.addEventListener('input', () => syncHidden(true));
+  syncHidden(false);
 }
 
 function pillForStatus(status, map) {
@@ -629,7 +656,7 @@ async function loadEditForm(slug, area) {
       <div class="hidden" id="edit-history-${slug}" style="margin-top:var(--space-3);"></div>
     `;
 
-    mountLocationPicker(document.getElementById(`edit-location-wrap-${slug}`), `edit-location-${slug}`, listing.location || '');
+    mountLocationPicker(document.getElementById(`edit-location-wrap-${slug}`), `edit-location-${slug}`, listing.location || '', `edit-dateline-${slug}`);
 
     document.querySelector(`.edit-listing-form[data-slug="${slug}"]`).addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1023,7 +1050,7 @@ async function renderCreateTab(content) {
     </div>
   `;
 
-  mountLocationPicker(document.getElementById('location-wrap'), 'location', '');
+  mountLocationPicker(document.getElementById('location-wrap'), 'location', '', 'dateline');
 
   if (!categories.length) {
     document.getElementById('create-alert').innerHTML = `<div class="alert alert-info">No categories exist yet. An admin needs to create one (via /admin/) before you can publish.</div>`;
@@ -1057,7 +1084,7 @@ async function renderCreateTab(content) {
       });
       alertBox.innerHTML = `<div class="alert alert-success">Draft created. Switch to "My Listings" to submit it for review.</div>`;
       document.getElementById('create-form').reset();
-      mountLocationPicker(document.getElementById('location-wrap'), 'location', '');
+      mountLocationPicker(document.getElementById('location-wrap'), 'location', '', 'dateline');
     } catch (err) {
       alertBox.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
     } finally {
@@ -1163,6 +1190,7 @@ async function renderPurchasesTab(content) {
           <div>
             <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" style="font-weight:600;">${escapeHtml(o.listing_title)}</a>
             <p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.82rem;">${money(o.amount, o.currency)} &middot; ${pillForStatus(o.status, statusMap)} &middot; ${timeAgo(o.created_at)}</p>
+            ${o.status === 'failed' ? `<p class="text-muted" style="margin: var(--space-1) 0 0 0; font-size:0.78rem; color:var(--color-danger);">${escapeHtml((o.transactions && o.transactions[0] && o.transactions[0].failure_reason) || 'Payment was not completed.')}</p>` : ''}
           </div>
           ${o.status === 'paid' ? `<button class="btn btn-outline btn-sm refund-request-btn" data-order-id="${o.id}" data-title="${escapeHtml(o.listing_title)}">Request refund</button>` : ''}
         </div>
@@ -1222,11 +1250,11 @@ async function renderWithdrawalsTab(content) {
     content.innerHTML = `
       <div class="card" style="padding: var(--space-6); margin-bottom:var(--space-5);">
         <h3 style="margin-top:0;">Payout accounts</h3>
-        <p class="text-muted" style="margin-top:-8px;">Add a mobile money or bank account. A moderator verifies it once, then you can withdraw to it anytime.</p>
+        <p class="text-muted" style="margin-top:-8px;">Add a mobile money or bank account. The account holder name is taken automatically from your verified identity (KYC) -- you don't need to type it. A super admin verifies the account once, then you can withdraw to it anytime.</p>
         <div id="payout-alert"></div>
         ${payoutAccounts.length ? payoutAccounts.map((a) => `
           <div class="table-row">
-            <span>${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}${a.is_default ? ' <span class="pill pill-verified">default</span>' : ''}</span>
+            <span>${escapeHtml(a.account_name)} &middot; ${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}${a.is_default ? ' <span class="pill pill-verified">default</span>' : ''}</span>
             <span>${pillForStatus(a.status, payoutStatusMap)}</span>
             <span class="text-muted">${escapeHtml(a.rejection_reason || '')}</span>
             <span>${!a.is_default ? `<button class="btn btn-ghost btn-sm payout-set-default" data-id="${a.id}">Set default</button>` : ''}</span>
@@ -1251,10 +1279,6 @@ async function renderWithdrawalsTab(content) {
             <div class="form-group">
               <label for="p-number">Account/phone number</label>
               <input type="text" id="p-number" placeholder="+255712345678" required>
-            </div>
-            <div class="form-group">
-              <label for="p-name">Account holder name</label>
-              <input type="text" id="p-name" required>
             </div>
           </div>
           <button type="submit" class="btn btn-sm" id="payout-submit-btn">Add payout account</button>
@@ -1311,7 +1335,6 @@ async function renderWithdrawalsTab(content) {
             account_type: document.getElementById('p-type').value,
             provider: document.getElementById('p-provider').value,
             account_number: document.getElementById('p-number').value,
-            account_name: document.getElementById('p-name').value,
           },
         });
         renderWithdrawalsTab(content);

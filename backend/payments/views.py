@@ -136,7 +136,22 @@ class OrderStatusPollView(APIView):
             order = Order.objects.get(pk=id, buyer=request.user)
         except Order.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"status": order.status})
+
+        failure_reason = ""
+        if order.status == Order.Status.FAILED:
+            # Most recent attempt across whichever rail this order used --
+            # the buyer-facing reason a payment didn't go through, not just
+            # logged internally (SelcomTransaction/NalaTransaction.failure_reason
+            # were captured but never surfaced anywhere until now).
+            last_selcom = order.transactions.order_by("-created_at").first()
+            last_nala = order.nala_transactions.order_by("-created_at").first()
+            last = max(
+                [t for t in (last_selcom, last_nala) if t is not None],
+                key=lambda t: t.created_at, default=None,
+            )
+            failure_reason = (last.failure_reason if last else "") or "Payment was not completed."
+
+        return Response({"status": order.status, "failure_reason": failure_reason})
 
 
 class OrderCancelView(APIView):

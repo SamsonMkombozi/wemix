@@ -786,6 +786,13 @@ async function renderListingVerificationQueue(content) {
 }
 
 async function renderPayoutAccountsQueue(content) {
+  // Approving a payout destination decides where real money is allowed to
+  // go, so it's restricted to super_admin (same gate as Treasury company
+  // withdrawals) -- other moderators see why instead of a raw 403.
+  if (CURRENT_USER?.role !== 'super_admin') {
+    content.innerHTML = `<div class="empty-state"><h3>Super admin access required</h3><p>Verifying payout accounts is restricted to super admins, since it decides where sellers' money is allowed to go.</p></div>`;
+    return;
+  }
   try {
     const data = await apiFetch('/api/wallet/payout-accounts/queue/');
     const results = data.results || data;
@@ -798,9 +805,7 @@ async function renderPayoutAccountsQueue(content) {
         <div class="flex-between" style="align-items:flex-start;">
           <div>
             <strong>${escapeHtml(a.account_name)}</strong>
-            ${a.name_match_score != null ? (a.name_match_score < 70
-              ? `<span class="pill pill-rejected" title="Fuzzy match against the user's verified KYC name">&#9888; name match ${a.name_match_score}%</span>`
-              : `<span class="pill pill-verified" title="Fuzzy match against the user's verified KYC name">name match ${a.name_match_score}%</span>`) : ''}
+            <span class="pill pill-verified" title="Taken automatically from the user's verified KYC identity, not typed in">from verified KYC</span>
             <p style="margin: var(--space-1) 0; font-size:0.85rem;">${escapeHtml(a.provider || a.account_type.replace('_', ' '))} &middot; ${escapeHtml(a.account_number)}</p>
             <p class="text-muted" style="font-size:0.8rem; margin:0;">${escapeHtml(a.account_type.replace('_', ' '))} &middot; ${timeAgo(a.created_at)}</p>
           </div>
@@ -1518,7 +1523,10 @@ async function renderSalesTab(content) {
       }
       listArea.innerHTML = results.map((o) => `
         <div class="table-row">
-          <span><a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" target="_blank">${escapeHtml(o.listing_title)}</a></span>
+          <span>
+            <a href="listing.html?slug=${encodeURIComponent(o.listing_slug)}" target="_blank">${escapeHtml(o.listing_title)}</a>
+            ${o.status === 'failed' && o.failure_reason ? `<div class="text-muted" style="font-size:0.78rem; color:var(--color-danger); margin-top:2px;">${escapeHtml(o.failure_reason)}</div>` : ''}
+          </span>
           <span class="text-muted">${escapeHtml(o.buyer_username)} &rarr; ${escapeHtml(o.seller_username)}</span>
           <span>${money(o.amount, o.currency)}</span>
           <span>${escapeHtml(o.payment_provider)}</span>

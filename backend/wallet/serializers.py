@@ -22,38 +22,48 @@ class WalletSerializer(serializers.ModelSerializer):
         return obj.balance - obj.pending_balance
 
 
-class PayoutAccountSerializer(serializers.ModelSerializer):
-    name_match_score = serializers.SerializerMethodField()
+def _verified_kyc_name(user_id):
+    """The user's OCR'd full name from their most recent VERIFIED
+    IdentityVerification, or None if they don't have one yet. Real
+    mobile-money/bank name-lookup APIs aren't available to this system
+    (no such endpoint exists in the Selcom/Nala integrations we have
+    credentials for), so this is the closest honest substitute for
+    "detect the account holder automatically": the platform already knows
+    the user's real name from their own KYC submission, so it uses that
+    instead of asking them to retype it -- and since it's the source of
+    truth for the payout account's name, a mismatch against KYC becomes
+    structurally impossible rather than just a warning score."""
+    from accounts.models import IdentityVerification
 
+    verified_kyc = IdentityVerification.objects.filter(
+        user_id=user_id, status=IdentityVerification.Status.VERIFIED,
+    ).order_by("-reviewed_at").first()
+    if not verified_kyc or not verified_kyc.ocr_full_name:
+        return None
+    return verified_kyc.ocr_full_name.strip()
+
+
+class PayoutAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = PayoutAccount
         fields = [
             "id", "account_type", "provider", "account_number", "account_name",
-            "is_default", "status", "rejection_reason", "name_match_score", "created_at",
+            "is_default", "status", "rejection_reason", "created_at",
         ]
-        read_only_fields = ["id", "status", "rejection_reason", "name_match_score", "created_at"]
-
-    def get_name_match_score(self, obj):
-        """0-100 fuzzy match between this payout account's declared name
-        and the user's OCR'd KYC name -- a low score doesn't block review
-        (OCR isn't perfect, married names/nicknames are legitimate), but
-        surfaces a mismatch warning so a moderator doesn't have to eyeball
-        it manually on every single review."""
-        import difflib
-
-        from accounts.models import IdentityVerification
-
-        verified_kyc = IdentityVerification.objects.filter(
-            user_id=obj.user_id, status=IdentityVerification.Status.VERIFIED,
-        ).order_by("-reviewed_at").first()
-        if not verified_kyc or not verified_kyc.ocr_full_name:
-            return None
-        a = obj.account_name.strip().lower()
-        b = verified_kyc.ocr_full_name.strip().lower()
-        return round(difflib.SequenceMatcher(None, a, b).ratio() * 100)
+        # account_name is no longer client-writable -- see create() below.
+        read_only_fields = ["id", "account_name", "status", "rejection_reason", "created_at"]
 
     def create(self, validated_data):
         user = self.context["request"].user
+        kyc_name = _verified_kyc_name(user.id)
+        if not kyc_name:
+            raise serializers.ValidationError(
+                "Your identity verification (KYC) needs to be approved before you can register a "
+                "payout account -- the account holder name is taken automatically from your verified ID, "
+                "not typed in, so there's nothing to verify a name against yet."
+            )
+        validated_data["account_name"] = kyc_name
+
         # Only one default at a time -- if this is the user's first account,
         # or they explicitly asked for it, make it the default and clear any
         # existing one.
@@ -68,6 +78,27 @@ class PayoutAccountReviewSerializer(serializers.Serializer):
     STATUS_CHOICES = ["verified", "rejected"]
     status = serializers.ChoiceField(choices=STATUS_CHOICES)
     rejection_reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
+
+    def validate(self, attrs):
+        if attrs["status"] == "verified":
+            account = self.context["account"]
+            kyc_name = _verified_kyc_name(account.user_id)
+            # Belt-and-suspenders re-check at the moment of final approval,
+            # not just at account creation: refuses to verify a payout
+            # destination whose name isn't (or is no longer) backed by a
+            # verified KYC identity, so no payment can ever be approved to
+            # go to an account that doesn't match KYC documents.
+            if not kyc_name:
+                raise serializers.ValidationError(
+                    "This user doesn't have a verified identity (KYC) on file -- can't approve a payout "
+                    "account without one."
+                )
+            if kyc_name != account.account_name.strip():
+                raise serializers.ValidationError(
+                    "This payout account's name no longer matches the user's current verified KYC name "
+                    f"(\"{account.account_name}\" vs. \"{kyc_name}\") -- ask them to re-register it."
+                )
+        return attrs
 
     def save(self, **kwargs):
         from django.utils import timezone

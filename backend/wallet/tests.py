@@ -296,47 +296,82 @@ class CompanyTreasuryPermissionTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class PayoutAccountNameMatchTests(APITestCase):
-    def test_name_match_score_none_without_verified_kyc(self):
+class PayoutAccountKYCNameTests(APITestCase):
+    """The account holder name is no longer client-supplied -- it's taken
+    automatically from the user's verified KYC identity, and a payout
+    account can't even be created without one. See wallet/serializers.py
+    PayoutAccountSerializer.create() and _verified_kyc_name()."""
+
+    def _verify_kyc(self, user, full_name="John Doe"):
+        from accounts.models import IdentityVerification
+
+        return IdentityVerification.objects.create(
+            user=user, id_type=IdentityVerification.IdType.NIDA,
+            front_image="kyc/front.jpg", selfie_image="kyc/selfie.jpg",
+            status=IdentityVerification.Status.VERIFIED, ocr_full_name=full_name,
+        )
+
+    def test_cannot_create_payout_account_without_verified_kyc(self):
         seller = make_seller()
+        self.client.force_authenticate(seller)
+        resp = self.client.post("/api/wallet/payout-accounts/", {
+            "account_type": "mobile_money", "account_number": "0712345678", "account_name": "Someone Else",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_account_name_is_taken_from_kyc_not_client_input(self):
+        seller = make_seller()
+        self._verify_kyc(seller, full_name="Amina Juma")
+        self.client.force_authenticate(seller)
+        resp = self.client.post("/api/wallet/payout-accounts/", {
+            "account_type": "mobile_money", "account_number": "0712345678",
+            "account_name": "A Totally Different Typed-In Name",
+        })
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["account_name"], "Amina Juma")
+
+    def test_super_admin_can_verify_payout_account(self):
+        seller = make_seller()
+        self._verify_kyc(seller)
+        super_admin = User.objects.create_user(
+            username="sa2", email="sa2@example.com", password="pw12345678!", role=User.Role.SUPER_ADMIN,
+        )
         account = PayoutAccount.objects.create(
             user=seller, account_type=PayoutAccount.AccountType.MOBILE_MONEY,
             account_number="0712345678", account_name="John Doe",
         )
-        from .serializers import PayoutAccountSerializer
-        data = PayoutAccountSerializer(account).data
-        self.assertIsNone(data["name_match_score"])
+        self.client.force_authenticate(super_admin)
+        resp = self.client.post(f"/api/wallet/payout-accounts/{account.id}/review/", {"status": "verified"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
-    def test_name_match_score_high_for_matching_name(self):
-        from accounts.models import IdentityVerification
-
+    def test_plain_moderator_cannot_verify_payout_account(self):
         seller = make_seller()
-        IdentityVerification.objects.create(
-            user=seller, id_type=IdentityVerification.IdType.NIDA,
-            front_image="kyc/front.jpg", selfie_image="kyc/selfie.jpg",
-            status=IdentityVerification.Status.VERIFIED, ocr_full_name="John Doe",
+        self._verify_kyc(seller)
+        moderator = User.objects.create_user(
+            username="mod2", email="mod2@example.com", password="pw12345678!", role=User.Role.MODERATOR,
         )
         account = PayoutAccount.objects.create(
             user=seller, account_type=PayoutAccount.AccountType.MOBILE_MONEY,
             account_number="0712345678", account_name="John Doe",
         )
-        from .serializers import PayoutAccountSerializer
-        data = PayoutAccountSerializer(account).data
-        self.assertEqual(data["name_match_score"], 100)
+        self.client.force_authenticate(moderator)
+        resp = self.client.post(f"/api/wallet/payout-accounts/{account.id}/review/", {"status": "verified"})
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_name_match_score_low_for_mismatched_name(self):
-        from accounts.models import IdentityVerification
-
+    def test_cannot_verify_when_name_no_longer_matches_kyc(self):
+        # A defensive re-check at approval time: if the stored account_name
+        # (e.g. from a row created before this KYC-derivation existed)
+        # doesn't match the user's current verified KYC name, approval is
+        # refused rather than trusting the stale stored value.
         seller = make_seller()
-        IdentityVerification.objects.create(
-            user=seller, id_type=IdentityVerification.IdType.NIDA,
-            front_image="kyc/front.jpg", selfie_image="kyc/selfie.jpg",
-            status=IdentityVerification.Status.VERIFIED, ocr_full_name="John Doe",
+        self._verify_kyc(seller, full_name="Correct Name")
+        super_admin = User.objects.create_user(
+            username="sa3", email="sa3@example.com", password="pw12345678!", role=User.Role.SUPER_ADMIN,
         )
         account = PayoutAccount.objects.create(
             user=seller, account_type=PayoutAccount.AccountType.MOBILE_MONEY,
-            account_number="0712345678", account_name="Completely Different Person",
+            account_number="0712345678", account_name="Stale Mismatched Name",
         )
-        from .serializers import PayoutAccountSerializer
-        data = PayoutAccountSerializer(account).data
-        self.assertLess(data["name_match_score"], 50)
+        self.client.force_authenticate(super_admin)
+        resp = self.client.post(f"/api/wallet/payout-accounts/{account.id}/review/", {"status": "verified"})
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

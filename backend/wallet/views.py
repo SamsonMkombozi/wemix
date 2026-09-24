@@ -134,19 +134,26 @@ class PayoutAccountSetDefaultView(APIView):
 
 
 class PayoutAccountQueueView(generics.ListAPIView):
-    """GET /api/wallet/payout-accounts/queue/ -- moderator view of pending payout account verifications."""
+    """GET /api/wallet/payout-accounts/queue/ -- pending payout account
+    verifications. Restricted to super_admin, same as reviewing one (see
+    PayoutAccountReviewView) -- approving where a seller's money goes is a
+    stricter gate than ordinary moderation actions."""
 
     serializer_class = PayoutAccountSerializer
-    permission_classes = [IsModeratorOrAbove]
+    permission_classes = [IsSuperAdmin]
 
     def get_queryset(self):
         return PayoutAccount.objects.filter(status=PayoutAccount.Status.PENDING).select_related("user")
 
 
 class PayoutAccountReviewView(APIView):
-    """POST /api/wallet/payout-accounts/<id>/review/ -- moderator verifies/rejects."""
+    """POST /api/wallet/payout-accounts/<id>/review/ -- verifies/rejects a
+    seller's payout destination. Deliberately restricted to super_admin
+    (not IsModeratorOrAbove, unlike most other review actions) -- this
+    decides where real money is allowed to go, the same reasoning
+    CompanyWithdrawalReviewView already uses for company treasury payouts."""
 
-    permission_classes = [IsModeratorOrAbove]
+    permission_classes = [IsSuperAdmin]
 
     def post(self, request, pk=None):
         account = get_object_or_404(PayoutAccount, pk=pk)
