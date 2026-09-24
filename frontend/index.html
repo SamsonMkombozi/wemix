@@ -44,20 +44,11 @@
      (css/style.css) -- see js/nav.js's topnav for the same pattern. */
   .wm-hidden { display: none !important; }
 
-  /* Main header (app bar) -- wordmark + account actions only. Search used
-     to live here; it now has its own row in .wm-toolbar directly below,
-     combined with the category nav and breaking-news ticker -- see that
-     block's comment for why. The wordmark itself (.wemix-wordmark) is
-     shared, defined once in css/style.css and reused everywhere the logo
-     appears across the whole system, not just this page. */
-  .wm-main-header { background: #fff; border-bottom: 1px solid var(--wm-border); }
-  .wm-main-header .container { display: flex; align-items: center; justify-content: space-between; padding-block: var(--space-4); gap: var(--space-6); flex-wrap: wrap; }
-
-  .wm-header-actions { display: flex; align-items: center; gap: var(--space-5); }
-  .wm-signin-btn { background: var(--wm-navy); color: #fff; border: none; padding: var(--space-3) var(--space-5); border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: inherit; }
-  .wm-signin-btn:hover { background: var(--wm-navy-2); }
-  .wm-user-chip { display: flex; align-items: center; gap: var(--space-2); font-size: 0.85rem; font-weight: 600; }
-  .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
+  /* The top app bar (wordmark + account actions) and the site footer are
+     no longer defined per-page -- they're the shared layout in js/nav.js
+     (renderNav/renderFooter, injected into #topnav-root/#footer-root),
+     the same component every other page in the system already used. See
+     js/nav.js and its .topnav/.wm-footer* rules in css/style.css. */
 
   /* Toolbar -- a single full-width search row directly below the app bar.
      Category select comes first, then the text input, then the search
@@ -165,20 +156,8 @@
      against the all-white page without adding another loud color. */
   .wm-section-tint { background: var(--wm-bg-alt); }
 
-  /* Footer -- only sections that link somewhere real: brand, live
-     category links, real contact channels, and the StaticPage-backed
-     Company/Resources pages (see core.StaticPage -- About/Careers/
-     Press/FAQ/Privacy/Cookie Policy are now real, moderator-editable
-     pages, not placeholder text). Social-icon links stay omitted until
-     real platform social accounts exist (see PlatformSetting). */
-  .wm-footer { background: var(--wm-navy); color: rgba(255,255,255,0.65); padding: var(--space-10) 0 var(--space-5); margin-top: var(--space-5); }
-  .wm-footer-grid { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 0.8fr 1fr; gap: var(--space-5); margin-bottom: var(--space-7); }
-  .wm-footer-col h4 { color: #fff; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 var(--space-3) 0; }
-  .wm-footer-col a { display: block; font-size: 0.82rem; margin-bottom: var(--space-2); color: rgba(255,255,255,0.65); }
-  .wm-footer-col a:hover { color: #fff; }
-  .wm-footer-contact-item { display: flex; align-items: center; gap: var(--space-2); font-size: 0.82rem; margin-bottom: var(--space-3); color: rgba(255,255,255,0.65); }
-  .wm-footer-contact-item svg { width: 14px; height: 14px; flex-shrink: 0; }
-  .wm-footer-bottom { border-top: 1px solid rgba(255,255,255,0.12); padding-top: var(--space-4); font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; color: rgba(255,255,255,0.5); }
+  /* Footer is the shared .wm-footer component (css/style.css / js/nav.js
+     renderFooter) now -- see the comment at the top of this <style> block. */
 
   /* Search-results mode (real search/category filtering, swaps out the editorial layout).
      Grid minmax and the card's radius/shadow/hover now match .grid/.listing-card
@@ -204,11 +183,9 @@
   @media (max-width: 900px) {
     .wm-hero-grid { grid-template-columns: 1fr; }
     .wm-trend-grid { grid-template-columns: 1fr 1fr; }
-    .wm-footer-grid { grid-template-columns: 1fr 1fr 1fr; }
   }
   @media (max-width: 560px) {
     .wm-trend-grid { grid-template-columns: 1fr; }
-    .wm-footer-grid { grid-template-columns: 1fr 1fr; }
     .wm-search-wrap select { max-width: 92px; font-size: 0.72rem; padding-inline: var(--space-2); }
     .wm-search-wrap input { font-size: 0.8rem; padding-inline: var(--space-3); }
   }
@@ -216,14 +193,7 @@
 </head>
 <body>
 
-<header class="wm-main-header">
-  <div class="container">
-    <a href="index.html" class="wemix-wordmark" style="font-size:1.6rem;">WEMIX<span>.</span></a>
-    <div class="wm-header-actions">
-      <div id="wm-auth-area"></div>
-    </div>
-  </div>
-</header>
+<div id="topnav-root"></div>
 
 <div class="wm-toolbar-search-row">
   <div class="container">
@@ -275,55 +245,10 @@
   </div>
 </main>
 
-<footer class="wm-footer">
-  <div class="container">
-    <div class="wm-footer-grid">
-      <div class="wm-footer-col">
-        <div class="wemix-wordmark on-dark" style="font-size:1.4rem;">WEMIX<span>.</span></div>
-        <p style="font-size:0.8rem; color:rgba(255,255,255,0.55); margin: var(--space-2) 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
-        <div id="wm-footer-social" style="margin-top: var(--space-3); font-size:0.8rem;"></div>
-      </div>
-      <div class="wm-footer-col">
-        <h4>Explore</h4>
-        <div id="wm-footer-categories"></div>
-      </div>
-      <div class="wm-footer-col">
-        <h4>Company</h4>
-        <a href="page.html?slug=about">About Us</a>
-        <a href="page.html?slug=careers">Careers</a>
-        <a href="page.html?slug=press-center">Press Center</a>
-      </div>
-      <div class="wm-footer-col">
-        <h4>Resources</h4>
-        <a href="page.html?slug=faq">FAQ</a>
-        <a href="page.html?slug=privacy-policy">Privacy Policy</a>
-        <a href="page.html?slug=cookie-policy">Cookie Policy</a>
-        <a href="terms.html">Terms of Use</a>
-      </div>
-      <div class="wm-footer-col">
-        <h4>Get In Touch</h4>
-        <div class="wm-footer-contact-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
-          <a href="mailto:info@wemix.co.tz">info@wemix.co.tz</a>
-        </div>
-        <div class="wm-footer-contact-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.902.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.908.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-          <a href="tel:+255712345678">+255 712 345 678</a>
-        </div>
-        <div class="wm-footer-contact-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-          <span>Dar es Salaam, Tanzania</span>
-        </div>
-      </div>
-    </div>
-    <div class="wm-footer-bottom">
-      <span id="wm-footer-copyright"></span>
-      <a href="terms.html" style="color:inherit;">Terms of Use</a>
-    </div>
-  </div>
-</footer>
+<div id="footer-root"></div>
 
 <script src="js/api.js"></script>
+<script src="js/nav.js"></script>
 <script>
 const CATEGORY_ICONS = {
   politics: '<path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/>',
@@ -351,26 +276,6 @@ rssLink.title = 'WEMIX — Latest Verified Stories';
 rssLink.href = `${API_BASE_URL}/feed.xml`;
 document.head.appendChild(rssLink);
 
-document.getElementById('wm-footer-copyright').textContent = `© ${new Date().getFullYear()} WEMIX — Global News Market. All Rights Reserved.`;
-
-function renderAuthArea() {
-  const el = document.getElementById('wm-auth-area');
-  if (Auth.isLoggedIn()) {
-    const user = Auth.getUser();
-    const initial = (user?.username || '?').charAt(0).toUpperCase();
-    const isStaff = ['moderator', 'admin', 'super_admin'].includes(user?.role);
-    el.innerHTML = `
-      <a href="${isStaff ? 'moderator.html' : 'dashboard.html'}" class="wm-user-chip">
-        <span class="wm-user-avatar">${escapeHtml(initial)}</span>
-        <span>${escapeHtml(user?.username || '')}</span>
-      </a>
-    `;
-  } else {
-    el.innerHTML = `<a href="login.html"><button class="wm-signin-btn">Sign In</button></a>`;
-  }
-}
-renderAuthArea();
-
 let ALL_CATEGORIES = [];
 
 async function loadCategories() {
@@ -394,18 +299,16 @@ async function loadCategories() {
     document.querySelectorAll('.wm-cat-item').forEach((el) => {
       el.addEventListener('click', () => showResults({ category: el.dataset.cat, label: el.querySelector('.wm-cat-label').textContent }));
     });
-
-    document.getElementById('wm-footer-categories').innerHTML = ALL_CATEGORIES.slice(0, 6).map((c) =>
-      `<a href="#" data-cat="${c.slug}">${escapeHtml(c.name)}</a>`
-    ).join('') + `<a href="#" data-latest="1">Latest News</a>`;
-    document.querySelectorAll('#wm-footer-categories a').forEach((a) => {
-      a.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (a.dataset.latest) showResults({ label: 'Latest News' });
-        else showResults({ category: a.dataset.cat, label: a.textContent });
-      });
-    });
   } catch (e) { /* categories are optional UX sugar */ }
+}
+
+// The shared footer (js/nav.js renderFooter) links its category column to
+// index.html?category=<slug> instead of calling showResults() directly --
+// it has to work as a plain link since it's the same footer on every page,
+// not just this one. Pick that up here on load.
+const _initialCategory = new URLSearchParams(window.location.search).get('category');
+if (_initialCategory) {
+  showResults({ category: _initialCategory, label: _initialCategory.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) });
 }
 
 document.querySelectorAll('.wm-view-all[data-latest]').forEach((el) => {
@@ -675,25 +578,8 @@ async function loadHomepageData() {
   } catch (e) { /* trending is supplementary */ }
 }
 
-const SOCIAL_LABELS = { facebook: 'Facebook', x: 'X', instagram: 'Instagram', linkedin: 'LinkedIn', youtube: 'YouTube', tiktok: 'TikTok', telegram: 'Telegram', whatsapp: 'WhatsApp' };
-
-// No hardcoded social URLs -- renders only whatever a moderator has
-// actually configured via PlatformSetting (see core.SocialLinksView).
-// An empty response means nothing renders here at all, which is the
-// honest state until a real account exists for a given platform.
-async function loadFooterSocialLinks() {
-  try {
-    const links = await apiFetch('/api/social-links/', { auth: false });
-    const entries = Object.entries(links).filter(([k, v]) => SOCIAL_LABELS[k] && v);
-    document.getElementById('wm-footer-social').innerHTML = entries
-      .map(([k, v]) => `<a href="${escapeHtml(v)}" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.65); margin-right: var(--space-3);">${SOCIAL_LABELS[k]}</a>`)
-      .join('');
-  } catch (e) { /* social links are supplementary */ }
-}
-
 loadCategories();
 loadHomepageData();
-loadFooterSocialLinks();
 </script>
 </body>
 </html>

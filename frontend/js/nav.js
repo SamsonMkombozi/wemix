@@ -1,4 +1,8 @@
-/* Renders the top nav into #topnav-root, adapting to logged in/out state. */
+/* The shared site layout: top nav (#topnav-root) + footer (#footer-root),
+   the one place both are defined so every page that includes this file --
+   index, dashboard, checkout, moderator, listing, page, terms -- stays in
+   sync automatically. Auth pages (login/register/reset-password) don't
+   include it; they use their own distraction-free split-panel layout. */
 
 const NAV_ICONS = {
   home: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 4.2 4h15.6l1.2 5.5"/><path d="M3 9.5a2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.6 0"/><path d="M5 9.8V20h14V9.8"/><path d="M9.5 20v-5.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V20"/></svg>`,
@@ -273,4 +277,97 @@ async function initNotificationBell() {
   refreshBadge();
 }
 
-document.addEventListener('DOMContentLoaded', renderNav);
+const FOOTER_SOCIAL_LABELS = { facebook: 'Facebook', x: 'X', instagram: 'Instagram', linkedin: 'LinkedIn', youtube: 'YouTube', tiktok: 'TikTok', telegram: 'Telegram', whatsapp: 'WhatsApp' };
+
+/* The one site footer, rendered into #footer-root on every page that
+   wants it (index, dashboard, checkout, moderator, listing, page,
+   terms -- everywhere except the auth pages, which use their own
+   distraction-free split-panel layout). Category links point at
+   index.html?category=<slug> rather than filtering in place, since this
+   footer has to work identically no matter which page it's rendered on. */
+function renderFooter() {
+  const root = document.getElementById('footer-root');
+  if (!root) return;
+
+  root.innerHTML = `
+    <footer class="wm-footer">
+      <div class="container">
+        <div class="wm-footer-grid">
+          <div class="wm-footer-col">
+            <div class="wemix-wordmark on-dark" style="font-size:1.4rem;">WEMIX<span>.</span></div>
+            <p style="font-size:0.8rem; color:rgba(255,255,255,0.55); margin: var(--space-2) 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
+            <div id="wm-footer-social" style="margin-top: var(--space-3); font-size:0.8rem;"></div>
+          </div>
+          <div class="wm-footer-col">
+            <h4>Explore</h4>
+            <div id="wm-footer-categories"></div>
+          </div>
+          <div class="wm-footer-col">
+            <h4>Company</h4>
+            <a href="page.html?slug=about">About Us</a>
+            <a href="page.html?slug=careers">Careers</a>
+            <a href="page.html?slug=press-center">Press Center</a>
+          </div>
+          <div class="wm-footer-col">
+            <h4>Resources</h4>
+            <a href="page.html?slug=faq">FAQ</a>
+            <a href="page.html?slug=privacy-policy">Privacy Policy</a>
+            <a href="page.html?slug=cookie-policy">Cookie Policy</a>
+            <a href="terms.html">Terms of Use</a>
+          </div>
+          <div class="wm-footer-col">
+            <h4>Get In Touch</h4>
+            <div class="wm-footer-contact-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+              <a href="mailto:info@wemix.co.tz">info@wemix.co.tz</a>
+            </div>
+            <div class="wm-footer-contact-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.902.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.908.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+              <a href="tel:+255712345678">+255 712 345 678</a>
+            </div>
+            <div class="wm-footer-contact-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              <span>Dar es Salaam, Tanzania</span>
+            </div>
+          </div>
+        </div>
+        <div class="wm-footer-bottom">
+          <span id="wm-footer-copyright">&copy; ${new Date().getFullYear()} WEMIX &mdash; Global News Market. All Rights Reserved.</span>
+          <a href="terms.html" style="color:inherit;">Terms of Use</a>
+        </div>
+      </div>
+    </footer>
+  `;
+
+  loadFooterCategories();
+  loadFooterSocialLinks();
+}
+
+async function loadFooterCategories() {
+  try {
+    const data = await apiFetch('/api/news/categories/', { auth: false });
+    const categories = data.results || data;
+    document.getElementById('wm-footer-categories').innerHTML = categories.slice(0, 6).map((c) =>
+      `<a href="index.html?category=${encodeURIComponent(c.slug)}">${escapeHtml(c.name)}</a>`
+    ).join('') + `<a href="index.html">Latest News</a>`;
+  } catch (e) { /* categories are optional UX sugar */ }
+}
+
+// No hardcoded social URLs -- renders only whatever a moderator has
+// actually configured via PlatformSetting (see core.SocialLinksView). An
+// empty response means nothing renders here at all, which is the honest
+// state until a real account exists for a given platform.
+async function loadFooterSocialLinks() {
+  try {
+    const links = await apiFetch('/api/social-links/', { auth: false });
+    const entries = Object.entries(links).filter(([k, v]) => FOOTER_SOCIAL_LABELS[k] && v);
+    document.getElementById('wm-footer-social').innerHTML = entries
+      .map(([k, v]) => `<a href="${escapeHtml(v)}" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.65); margin-right: var(--space-3);">${FOOTER_SOCIAL_LABELS[k]}</a>`)
+      .join('');
+  } catch (e) { /* social links are supplementary */ }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderNav();
+  renderFooter();
+});

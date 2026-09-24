@@ -1104,7 +1104,12 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
   .dash-drawer .dash-nav-link { padding: var(--space-3); border-radius: 8px; border-left: none; }
   .dash-drawer .dash-nav-link.active { background: var(--color-gold); color: var(--color-black); }
 
-  body.has-dash-bottom-nav { padding-bottom: var(--space-10); }
+  /* Must clear the fixed bar's real rendered height (~71px measured, not
+     just its icon+label content) plus the safe-area it also reserves --
+     var(--space-10) alone (40px) left the last line of whatever's at the
+     bottom of the page (now the shared footer's copyright bar) partly
+     hidden behind it. */
+  body.has-dash-bottom-nav { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 }
 
 .table-row {
@@ -1272,15 +1277,30 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
 }
 
 /* ---------------------------------------------------------------------- */
-/* Footer                                                                 */
+/* Footer -- the one site footer, rendered by js/nav.js's renderFooter()  */
+/* into #footer-root on every page that wants site chrome (same idea as   */
+/* .topnav above). Only sections that link somewhere real: brand, live    */
+/* category links, real contact channels, and the StaticPage-backed       */
+/* Company/Resources pages (see core.StaticPage -- About/Careers/Press/   */
+/* FAQ/Privacy/Cookie Policy are real, moderator-editable pages, not      */
+/* placeholder text). Social-icon links stay omitted until real platform  */
+/* social accounts exist (see PlatformSetting).                          */
 /* ---------------------------------------------------------------------- */
 
-footer {
-  border-top: 1px solid var(--color-border);
-  padding: var(--space-8) 0;
-  margin-top: var(--space-10);
-  color: var(--color-text-muted);
-  font-size: 0.82rem;
+.wm-footer { background: var(--color-black); color: rgba(255,255,255,0.65); padding: var(--space-10) 0 var(--space-5); margin-top: var(--space-10); }
+.wm-footer-grid { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 0.8fr 1fr; gap: var(--space-5); margin-bottom: var(--space-7); }
+.wm-footer-col h4 { color: #fff; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 var(--space-3) 0; }
+.wm-footer-col a { display: block; font-size: 0.82rem; margin-bottom: var(--space-2); color: rgba(255,255,255,0.65); }
+.wm-footer-col a:hover { color: #fff; }
+.wm-footer-contact-item { display: flex; align-items: center; gap: var(--space-2); font-size: 0.82rem; margin-bottom: var(--space-3); color: rgba(255,255,255,0.65); }
+.wm-footer-contact-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+.wm-footer-bottom { border-top: 1px solid rgba(255,255,255,0.12); padding-top: var(--space-4); font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; color: rgba(255,255,255,0.5); }
+
+@media (max-width: 900px) {
+  .wm-footer-grid { grid-template-columns: 1fr 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .wm-footer-grid { grid-template-columns: 1fr 1fr; }
 }
 
 /* ---------------------------------------------------------------------- */
