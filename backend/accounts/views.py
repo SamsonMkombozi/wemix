@@ -26,6 +26,7 @@ from .serializers import (
     ModeratorUserSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    PublicSellerSearchSerializer,
     RegisterSerializer,
     UserAdminEditSerializer,
     UserSerializer,
@@ -437,6 +438,32 @@ class Disable2FAView(APIView):
         log_action(actor=request.user, action=AuditLog.Action.UPDATE, target_model="User",
                    target_id=request.user.id, description="2FA disabled.", request=request)
         return Response({"detail": "Two-factor authentication disabled."})
+
+
+class PublicSellerSearchView(generics.ListAPIView):
+    """GET /api/accounts/search/?q=... -- public, unauthenticated marketplace
+    search over seller-type accounts (seller/journalist/media_house), so the
+    homepage search bar can find a person/organization, not just listings.
+    Deliberately excludes buyers (no public profile to link to) and any
+    banned/suspended/deleted account. Same PublicSellerSearchSerializer
+    allowlist regardless of who's asking -- there's no elevated view here,
+    unlike UserListView below."""
+
+    serializer_class = PublicSellerSearchSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None  # small, capped result set -- see get_queryset
+
+    def get_queryset(self):
+        q = self.request.query_params.get("q", "").strip()
+        if not q:
+            return User.objects.none()
+        from django.db.models import Q
+
+        return User.objects.filter(
+            Q(username__icontains=q) | Q(organization_name__icontains=q),
+            role__in=[User.Role.SELLER, User.Role.JOURNALIST, User.Role.MEDIA_HOUSE],
+            is_banned=False, is_suspended=False, is_deleted=False, is_active=True,
+        ).order_by("-trust_score")[:8]
 
 
 class UserListView(generics.ListCreateAPIView):

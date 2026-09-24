@@ -375,3 +375,72 @@ class PasswordResetTests(APITestCase):
             self.assertEqual(resp.status_code, status.HTTP_200_OK)
         throttled = self.client.post("/api/accounts/password-reset/request/", {"email": "pwreset1@example.com"})
         self.assertEqual(throttled.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class PublicSellerSearchTests(APITestCase):
+    def setUp(self):
+        self.seller = User.objects.create_user(
+            username="searchable_seller", email="searchable_seller@example.com", password="Pass123!",
+            role=User.Role.SELLER, organization_name="Acme News Co",
+        )
+        self.journalist = User.objects.create_user(
+            username="searchable_journo", email="searchable_journo@example.com", password="Pass123!",
+            role=User.Role.JOURNALIST,
+        )
+        self.buyer = User.objects.create_user(
+            username="searchable_buyer", email="searchable_buyer@example.com", password="Pass123!",
+            role=User.Role.BUYER,
+        )
+        self.suspended_seller = User.objects.create_user(
+            username="searchable_suspended", email="searchable_suspended@example.com", password="Pass123!",
+            role=User.Role.SELLER, is_suspended=True,
+        )
+        self.banned_seller = User.objects.create_user(
+            username="searchable_banned", email="searchable_banned@example.com", password="Pass123!",
+            role=User.Role.SELLER, is_banned=True,
+        )
+
+    def test_no_auth_required(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+    def test_finds_seller_by_username(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable_seller"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertIn("searchable_seller", usernames)
+
+    def test_finds_seller_by_organization_name(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "Acme"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertIn("searchable_seller", usernames)
+
+    def test_finds_journalist(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable_journo"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertIn("searchable_journo", usernames)
+
+    def test_excludes_buyers(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertNotIn("searchable_buyer", usernames)
+
+    def test_excludes_suspended_accounts(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertNotIn("searchable_suspended", usernames)
+
+    def test_excludes_banned_accounts(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable"})
+        usernames = [u["username"] for u in resp.data]
+        self.assertNotIn("searchable_banned", usernames)
+
+    def test_empty_query_returns_no_results(self):
+        resp = self.client.get("/api/accounts/search/")
+        self.assertEqual(resp.data, [])
+
+    def test_response_excludes_sensitive_fields(self):
+        resp = self.client.get("/api/accounts/search/", {"q": "searchable_seller"})
+        result = resp.data[0]
+        self.assertNotIn("email", result)
+        self.assertNotIn("phone_number", result)
+        self.assertNotIn("id_verification_status", result)

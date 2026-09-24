@@ -59,55 +59,47 @@
   .wm-user-chip { display: flex; align-items: center; gap: var(--space-2); font-size: 0.85rem; font-weight: 600; }
   .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
 
-  /* Toolbar -- one combined section directly below the app bar: a
-     full-width search row, then a row combining the category nav and the
-     breaking-news ticker side by side (stacked on narrow screens, where
-     there isn't room for both inline -- see the max-width: 900px rule
-     near the bottom of this block). Previously these were three separate
-     rows (search lived in the app bar; nav and breaking news were each
-     their own bar) -- now consolidated per request. */
+  /* Toolbar -- a single full-width search row directly below the app bar.
+     Category select comes first, then the text input, then the search
+     button -- an Amazon-style "search within a category" layout, all one
+     connected control. The category nav and breaking-news ticker that
+     used to live below this (as their own row, then later combined into
+     one row with it) have been removed outright per request; "Top
+     Categories" further down the page and each listing's own category
+     tag remain as the way to browse by category. */
   .wm-toolbar-search-row { background: #fff; border-bottom: 1px solid var(--wm-border); padding-block: var(--space-4); }
-  .wm-search-wrap { display: flex; max-width: 640px; }
-  .wm-search-wrap input { flex: 1; border: 1px solid var(--wm-border); border-right: none; border-radius: 6px 0 0 6px; padding: var(--space-3) var(--space-4); font-size: 0.85rem; font-family: inherit; }
-  .wm-search-wrap select { border: 1px solid var(--wm-border); border-left: none; border-right: none; padding: var(--space-3) var(--space-3); font-size: 0.82rem; font-family: inherit; background: #fafafa; max-width: 130px; }
-  .wm-search-wrap button { border: none; background: var(--wm-navy); color: #fff; padding: 0 var(--space-4); border-radius: 0 6px 6px 0; cursor: pointer; }
-
-  .wm-toolbar-nav-row { background: var(--wm-navy); }
-  .wm-toolbar-nav-row .container { display: flex; align-items: center; gap: var(--space-5); }
-
-  /* Main nav */
-  .wm-main-nav-links { display: flex; align-items: center; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
-  .wm-main-nav-links::-webkit-scrollbar { display: none; }
-  .wm-nav-link { color: rgba(255,255,255,0.8); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.03em; padding: var(--space-3) var(--space-4); white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
-  .wm-nav-link:hover, .wm-nav-link.active { color: #fff; border-bottom-color: var(--wm-red); }
-  .wm-nav-more { position: relative; flex-shrink: 0; }
-  .wm-nav-more-dropdown { display: none; position: absolute; top: 100%; left: 0; background: #fff; border: 1px solid var(--wm-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 180px; z-index: 20; padding: var(--space-2) 0; }
-  .wm-nav-more-dropdown.wm-open { display: block; }
-  .wm-nav-more-dropdown .wm-nav-link { display: block; color: var(--wm-text); padding: var(--space-2) var(--space-4); border-bottom: none; }
-  .wm-nav-more-dropdown .wm-nav-link:hover { color: var(--wm-blue); }
-
-  /* Breaking ticker -- now docked to the right of the nav row (navy
-     background), so its colors are inverted from the old white-bar
-     version: light ticker text instead of dark, translucent-white
-     prev/next buttons instead of navy-on-navy (which would've been
-     invisible against this row's background). */
-  .wm-breaking-inline { flex: 0 0 340px; min-width: 0; display: flex; align-items: center; gap: var(--space-3); border-left: 1px solid rgba(255,255,255,0.15); padding-left: var(--space-5); }
-  .wm-breaking-tag { background: var(--wm-red); color: var(--color-black); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.05em; padding: var(--space-1) var(--space-3); border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
-  .wm-breaking-track-wrap { flex: 1; min-width: 0; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-  .wm-breaking-track { font-size: 0.8rem; color: rgba(255,255,255,0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .wm-breaking-track span:not(:last-child)::after { content: '•'; margin: 0 var(--space-4); color: var(--wm-red); }
-  .wm-breaking-nav { display: flex; gap: var(--space-2); flex-shrink: 0; }
-  .wm-breaking-nav button { width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
-  .wm-breaking-nav button:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
-  .wm-breaking-nav button:disabled { opacity: 0.35; cursor: default; }
-  .wm-breaking-nav svg { width: 12px; height: 12px; }
-
-  /* Below ~900px there's no room for nav links and the breaking ticker
-     side by side -- stack them instead of squeezing both into one row. */
-  @media (max-width: 900px) {
-    .wm-toolbar-nav-row .container { flex-wrap: wrap; padding-block: var(--space-2); }
-    .wm-breaking-inline { border-left: none; padding-left: 0; flex-basis: 100%; padding-block: var(--space-2) 0; border-top: 1px solid rgba(255,255,255,0.15); margin-top: var(--space-2); padding-top: var(--space-3); }
+  .wm-search-wrap { display: flex; max-width: 640px; position: relative; }
+  .wm-search-wrap select {
+    border: 1px solid var(--wm-border); border-right: none; border-radius: 6px 0 0 6px;
+    padding: var(--space-3) var(--space-3); font-size: 0.82rem; font-family: inherit;
+    background: #fafafa; max-width: 150px; min-width: 0; flex-shrink: 0; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
   }
+  /* The requested "black on hover/selected" treatment -- a native <select>'s
+     own dropdown-option list is OS-rendered and not stylable across
+     browsers, so this targets the one part that reliably is: the closed
+     control itself, which goes black-on-gold (matching .btn's hover) the
+     moment it's focused or hovered, not just on open. */
+  .wm-search-wrap select:hover, .wm-search-wrap select:focus {
+    background: var(--color-black); color: #fff; border-color: var(--color-black); outline: none;
+  }
+  .wm-search-wrap input { flex: 1; min-width: 0; border: 1px solid var(--wm-border); border-left: none; border-right: none; padding: var(--space-3) var(--space-4); font-size: 0.85rem; font-family: inherit; }
+  .wm-search-wrap button { flex-shrink: 0; border: none; background: var(--wm-navy); color: #fff; padding: 0 var(--space-4); border-radius: 0 6px 6px 0; cursor: pointer; }
+
+  /* Live "smart" suggestions -- sellers/journalists matching what's typed
+     so far, shown as you type (debounced) and dismissed on blur/Escape/
+     pick. A plain text search still runs on submit regardless; this is
+     purely a faster path straight to a person instead of their stories. */
+  .wm-search-suggest {
+    position: absolute; top: 100%; left: 0; right: 44px; margin-top: 4px;
+    background: #fff; border: 1px solid var(--wm-border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 30; overflow: hidden;
+  }
+  .wm-search-suggest-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); cursor: pointer; }
+  .wm-search-suggest-item:hover, .wm-search-suggest-item.active { background: var(--color-black); color: #fff; }
+  .wm-search-suggest-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.75rem; flex-shrink: 0; overflow: hidden; }
+  .wm-search-suggest-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-search-suggest-name { font-size: 0.85rem; font-weight: 600; }
+  .wm-search-suggest-meta { font-size: 0.72rem; opacity: 0.65; text-transform: capitalize; }
 
   /* Sections -- padding-block only (vertical rhythm between sections).
      A plain `padding: X 0` shorthand here would also zero out left/right,
@@ -193,6 +185,14 @@
      (css/style.css) exactly, so these cards read as the same component family as
      every other listing card on the site instead of a page-local variant. */
   .wm-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-5); }
+  .wm-results-people { margin-bottom: var(--space-6); }
+  .wm-results-people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4); }
+  .wm-person-card { display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--wm-border); border-radius: var(--radius-md); padding: var(--space-3); text-decoration: none; color: inherit; transition: border-color 0.2s, transform 0.2s; }
+  .wm-person-card:hover { border-color: var(--color-black); transform: translateY(-2px); }
+  .wm-person-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.95rem; flex-shrink: 0; overflow: hidden; }
+  .wm-person-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .wm-person-name { font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 4px; }
+  .wm-person-meta { font-size: 0.75rem; color: var(--wm-muted); text-transform: capitalize; }
   .wm-result-card { border: 1px solid var(--wm-border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-card); transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s; display: block; }
   .wm-result-card:hover { box-shadow: var(--shadow-card-hover); border-color: var(--wm-blue); transform: translateY(-2px); }
   .wm-result-media { height: 130px; background: var(--wm-bg-alt); }
@@ -209,6 +209,8 @@
   @media (max-width: 560px) {
     .wm-trend-grid { grid-template-columns: 1fr; }
     .wm-footer-grid { grid-template-columns: 1fr 1fr; }
+    .wm-search-wrap select { max-width: 92px; font-size: 0.72rem; padding-inline: var(--space-2); }
+    .wm-search-wrap input { font-size: 0.8rem; padding-inline: var(--space-3); }
   }
 </style>
 </head>
@@ -223,42 +225,17 @@
   </div>
 </header>
 
-<div class="wm-toolbar">
-  <div class="wm-toolbar-search-row">
-    <div class="container">
-      <div class="wm-search-wrap">
-        <input type="text" id="wm-search-input" placeholder="Search news, topics, countries&hellip;">
-        <select id="wm-search-category"><option value="">All Categories</option></select>
-        <button id="wm-search-btn" aria-label="Search">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        </button>
-      </div>
+<div class="wm-toolbar-search-row">
+  <div class="container">
+    <div class="wm-search-wrap">
+      <select id="wm-search-category"><option value="">All Categories</option></select>
+      <input type="text" id="wm-search-input" placeholder="Search news, sellers, journalists&hellip;" autocomplete="off">
+      <div class="wm-search-suggest hidden" id="wm-search-suggest"></div>
+      <button id="wm-search-btn" aria-label="Search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
     </div>
   </div>
-
-  <nav class="wm-toolbar-nav-row">
-    <div class="container">
-      <div class="wm-main-nav-links">
-        <span class="wm-nav-link active" id="wm-nav-home">Home</span>
-        <span class="wm-nav-link" data-cat="" data-latest="1">Latest</span>
-        <div id="wm-nav-links" style="display:contents;"></div>
-        <div class="wm-nav-more wm-hidden" id="wm-nav-more">
-          <span class="wm-nav-link" id="wm-nav-more-toggle">More ▾</span>
-          <div class="wm-nav-more-dropdown" id="wm-nav-more-dropdown"></div>
-        </div>
-      </div>
-      <div class="wm-breaking-inline">
-        <div class="wm-breaking-tag">BREAKING NEWS</div>
-        <div class="wm-breaking-track-wrap">
-          <div class="wm-breaking-track" id="wm-breaking-track"></div>
-          <div class="wm-breaking-nav">
-            <button id="wm-breaking-prev" aria-label="Previous headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
-            <button id="wm-breaking-next" aria-label="Next headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </nav>
 </div>
 
 <main>
@@ -290,6 +267,10 @@
       <span class="wm-view-all" id="wm-back-to-home">&larr; Back to Home</span>
     </div>
     <div id="wm-results-status" class="text-muted" style="margin-bottom: var(--space-4);"></div>
+    <div id="wm-results-people" class="wm-results-people" style="display:none;">
+      <div class="wm-section-title" style="font-size:0.95rem;margin-bottom:var(--space-3);">Sellers &amp; Journalists</div>
+      <div class="wm-results-people-grid" id="wm-results-people-grid"></div>
+    </div>
     <div class="wm-results-grid" id="wm-results-grid"></div>
   </div>
 </main>
@@ -404,35 +385,6 @@ async function loadCategories() {
       searchSelect.appendChild(opt);
     });
 
-    const navWrap = document.getElementById('wm-nav-links');
-    const INLINE_NAV_COUNT = 7;
-    ALL_CATEGORIES.slice(0, INLINE_NAV_COUNT).forEach((c) => {
-      const span = document.createElement('span');
-      span.className = 'wm-nav-link';
-      span.dataset.cat = c.slug;
-      span.textContent = c.name;
-      span.addEventListener('click', () => { setActiveNav(span); showResults({ category: c.slug, label: c.name }); });
-      navWrap.appendChild(span);
-    });
-
-    const overflowCats = ALL_CATEGORIES.slice(INLINE_NAV_COUNT);
-    if (overflowCats.length) {
-      document.getElementById('wm-nav-more').classList.remove('wm-hidden');
-      const dropdown = document.getElementById('wm-nav-more-dropdown');
-      overflowCats.forEach((c) => {
-        const span = document.createElement('span');
-        span.className = 'wm-nav-link';
-        span.dataset.cat = c.slug;
-        span.textContent = c.name;
-        span.addEventListener('click', () => {
-          setActiveNav(span);
-          dropdown.classList.remove('wm-open');
-          showResults({ category: c.slug, label: c.name });
-        });
-        dropdown.appendChild(span);
-      });
-    }
-
     document.getElementById('wm-cat-row').innerHTML = ALL_CATEGORIES.slice(0, 10).map((c) => `
       <div class="wm-cat-item" data-cat="${c.slug}">
         ${catIconSvg(c.name)}
@@ -456,37 +408,21 @@ async function loadCategories() {
   } catch (e) { /* categories are optional UX sugar */ }
 }
 
-document.getElementById('wm-nav-more-toggle').addEventListener('click', (e) => {
-  e.stopPropagation();
-  document.getElementById('wm-nav-more-dropdown').classList.toggle('wm-open');
-});
-document.addEventListener('click', () => document.getElementById('wm-nav-more-dropdown').classList.remove('wm-open'));
-
-function setActiveNav(activeEl) {
-  document.querySelectorAll('.wm-nav-link').forEach((n) => n.classList.remove('active'));
-  if (activeEl) activeEl.classList.add('active');
-}
-
-document.querySelectorAll('.wm-nav-link[data-latest]').forEach((el) => {
-  el.addEventListener('click', () => { setActiveNav(el); showResults({ label: 'Latest News' }); });
-});
 document.querySelectorAll('.wm-view-all[data-latest]').forEach((el) => {
   el.addEventListener('click', () => showResults({ label: 'Latest News' }));
 });
 document.querySelectorAll('.wm-view-all[data-trending]').forEach((el) => {
   el.addEventListener('click', () => showResults({ trending: true, label: 'Trending Now' }));
 });
-document.getElementById('wm-nav-home').addEventListener('click', (e) => { setActiveNav(e.currentTarget); showHome(); });
 document.getElementById('wm-back-to-home').addEventListener('click', showHome);
 
 function showHome() {
   document.getElementById('wm-editorial-view').style.display = '';
   document.querySelectorAll('.wm-section').forEach((s) => { if (s.id !== 'wm-results-view') s.style.display = ''; });
   document.getElementById('wm-results-view').style.display = 'none';
-  setActiveNav(document.getElementById('wm-nav-home'));
 }
 
-async function showResults({ q, category, trending, label }) {
+async function showResults({ q, category, trending, seller, sellerLabel, label }) {
   document.querySelectorAll('.wm-section').forEach((s) => { if (s.id !== 'wm-results-view') s.style.display = 'none'; });
   document.getElementById('wm-editorial-view').style.display = 'none';
   const resultsView = document.getElementById('wm-results-view');
@@ -495,20 +431,51 @@ async function showResults({ q, category, trending, label }) {
 
   const statusEl = document.getElementById('wm-results-status');
   const grid = document.getElementById('wm-results-grid');
+  const peopleWrap = document.getElementById('wm-results-people');
+  const peopleGrid = document.getElementById('wm-results-people-grid');
   statusEl.innerHTML = '<span class="spinner"></span> Loading&hellip;';
   grid.innerHTML = '';
+  peopleWrap.style.display = 'none';
+  peopleGrid.innerHTML = '';
 
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (category) params.set('category', category);
   if (trending) params.set('trending', '1');
+  if (seller) params.set('seller', seller);
+
+  // A plain text search ("q") also checks for a matching seller/journalist/
+  // media house account, not just stories -- run both lookups together so
+  // people never have to know in advance whether they're searching for a
+  // person or a headline.
+  const peoplePromise = (q && !seller)
+    ? apiFetch(`/api/accounts/search/?q=${encodeURIComponent(q)}`, { auth: false }).catch(() => [])
+    : Promise.resolve([]);
 
   try {
-    const data = await apiFetch(`/api/news/listings/?${params.toString()}`, { auth: false });
+    const [data, people] = await Promise.all([
+      apiFetch(`/api/news/listings/?${params.toString()}`, { auth: false }),
+      peoplePromise,
+    ]);
     const results = data.results || data;
-    statusEl.textContent = results.length ? `${results.length} result${results.length === 1 ? '' : 's'}` : '';
+    const peopleResults = people.results || people;
+
+    if (peopleResults.length) {
+      peopleWrap.style.display = '';
+      peopleGrid.innerHTML = peopleResults.map(personCardHtml).join('');
+      peopleGrid.querySelectorAll('.wm-person-card').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          showResults({ seller: el.dataset.sellerId, label: `Stories by ${el.dataset.sellerName}` });
+        });
+      });
+    }
+
+    statusEl.textContent = results.length ? `${results.length} stor${results.length === 1 ? 'y' : 'ies'}` : '';
     grid.innerHTML = results.length ? results.map(resultCardHtml).join('') :
-      `<div class="empty-state" style="grid-column:1/-1;"><h3>No stories found</h3><p>Try a different search or category.</p></div>`;
+      (peopleResults.length
+        ? ''
+        : `<div class="empty-state" style="grid-column:1/-1;"><h3>No stories found</h3><p>Try a different search or category.</p></div>`);
   } catch (e) {
     statusEl.innerHTML = `<span class="form-error">Could not load results: ${escapeHtml(formatApiError(e))}</span>`;
   }
@@ -527,14 +494,99 @@ function resultCardHtml(l) {
   `;
 }
 
+function personInitial(p) {
+  return escapeHtml(((p.organization_name || p.username || '?')[0] || '?').toUpperCase());
+}
+
+function personCardHtml(p) {
+  const name = escapeHtml(p.organization_name || p.username);
+  return `
+    <a class="wm-person-card" href="#" data-seller-id="${p.id}" data-seller-name="${name}">
+      <div class="wm-person-avatar">${p.avatar ? `<img src="${p.avatar}" alt="">` : personInitial(p)}</div>
+      <div>
+        <div class="wm-person-name">${name}${p.is_verified_badge ? ' ✓' : ''}</div>
+        <div class="wm-person-meta">${escapeHtml((p.role || '').replace('_', ' '))}${p.listing_count ? ` &middot; ${p.listing_count} stor${p.listing_count === 1 ? 'y' : 'ies'}` : ''}</div>
+      </div>
+    </a>
+  `;
+}
+
 document.getElementById('wm-search-btn').addEventListener('click', doSearch);
-document.getElementById('wm-search-input').addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('wm-search-input').addEventListener('keyup', (e) => {
+  if (e.key === 'Enter') doSearch();
+  else if (e.key === 'Escape') hideSuggestions();
+});
 function doSearch() {
+  hideSuggestions();
   const q = document.getElementById('wm-search-input').value.trim();
   const category = document.getElementById('wm-search-category').value;
   if (!q && !category) return;
   showResults({ q, category, label: q ? `Results for "${q}"` : undefined });
 }
+
+// Live "smart" suggestions -- as the user types, show matching seller/
+// journalist/media-house accounts in a dropdown so they can jump straight
+// to a person instead of typing a full search and submitting.
+let suggestDebounce = null;
+let suggestItems = [];
+let suggestActiveIndex = -1;
+const suggestBox = document.getElementById('wm-search-suggest');
+const suggestInput = document.getElementById('wm-search-input');
+
+function hideSuggestions() {
+  suggestBox.classList.add('hidden');
+  suggestBox.innerHTML = '';
+  suggestItems = [];
+  suggestActiveIndex = -1;
+}
+
+function renderSuggestions() {
+  if (!suggestItems.length) { hideSuggestions(); return; }
+  suggestBox.innerHTML = suggestItems.map((p, i) => `
+    <div class="wm-search-suggest-item ${i === suggestActiveIndex ? 'active' : ''}" data-i="${i}">
+      <div class="wm-search-suggest-avatar">${p.avatar ? `<img src="${p.avatar}" alt="">` : personInitial(p)}</div>
+      <div>
+        <div class="wm-search-suggest-name">${escapeHtml(p.organization_name || p.username)}${p.is_verified_badge ? ' ✓' : ''}</div>
+        <div class="wm-search-suggest-meta">${escapeHtml((p.role || '').replace('_', ' '))}</div>
+      </div>
+    </div>
+  `).join('');
+  suggestBox.classList.remove('hidden');
+  suggestBox.querySelectorAll('.wm-search-suggest-item').forEach((el) => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const p = suggestItems[Number(el.dataset.i)];
+      hideSuggestions();
+      showResults({ seller: p.id, label: `Stories by ${escapeHtml(p.organization_name || p.username)}` });
+    });
+  });
+}
+
+suggestInput.addEventListener('input', () => {
+  const q = suggestInput.value.trim();
+  clearTimeout(suggestDebounce);
+  if (!q) { hideSuggestions(); return; }
+  suggestDebounce = setTimeout(async () => {
+    try {
+      const data = await apiFetch(`/api/accounts/search/?q=${encodeURIComponent(q)}`, { auth: false });
+      suggestItems = (data.results || data).slice(0, 6);
+      suggestActiveIndex = -1;
+      if (suggestInput.value.trim() === q) renderSuggestions();
+    } catch (e) { /* suggestions are optional UX sugar */ }
+  }, 250);
+});
+suggestInput.addEventListener('keydown', (e) => {
+  if (suggestBox.classList.contains('hidden') || !suggestItems.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); suggestActiveIndex = Math.min(suggestActiveIndex + 1, suggestItems.length - 1); renderSuggestions(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); suggestActiveIndex = Math.max(suggestActiveIndex - 1, 0); renderSuggestions(); }
+  else if (e.key === 'Enter' && suggestActiveIndex >= 0) {
+    e.preventDefault();
+    const p = suggestItems[suggestActiveIndex];
+    hideSuggestions();
+    showResults({ seller: p.id, label: `Stories by ${escapeHtml(p.organization_name || p.username)}` });
+  }
+});
+document.addEventListener('click', (e) => { if (!suggestInput.contains(e.target) && !suggestBox.contains(e.target)) hideSuggestions(); });
 
 let heroListings = [];
 let heroIndex = 0;
@@ -598,43 +650,10 @@ function trendCardHtml(l, i) {
   `;
 }
 
-const BREAKING_PAGE_SIZE = 3;
-let breakingHeadlines = [];
-let breakingPage = 0;
-
-function renderBreakingPage() {
-  const track = document.getElementById('wm-breaking-track');
-  const prevBtn = document.getElementById('wm-breaking-prev');
-  const nextBtn = document.getElementById('wm-breaking-next');
-  if (!breakingHeadlines.length) {
-    track.innerHTML = '<span>No published headlines yet -- be the first to list a verified story.</span>';
-    prevBtn.disabled = true;
-    nextBtn.disabled = true;
-    return;
-  }
-  const totalPages = Math.ceil(breakingHeadlines.length / BREAKING_PAGE_SIZE);
-  const start = breakingPage * BREAKING_PAGE_SIZE;
-  const page = breakingHeadlines.slice(start, start + BREAKING_PAGE_SIZE);
-  track.innerHTML = page.map((title) => `<span>${escapeHtml(title)}</span>`).join('');
-  prevBtn.disabled = breakingPage === 0;
-  nextBtn.disabled = breakingPage >= totalPages - 1;
-}
-
-function buildBreakingTicker(listings) {
-  breakingHeadlines = listings.slice(0, 12).map((l) => l.title);
-  breakingPage = 0;
-  renderBreakingPage();
-}
-
-document.getElementById('wm-breaking-prev').addEventListener('click', () => { breakingPage--; renderBreakingPage(); });
-document.getElementById('wm-breaking-next').addEventListener('click', () => { breakingPage++; renderBreakingPage(); });
-
 async function loadHomepageData() {
   try {
     const data = await apiFetch('/api/news/listings/?ordering=-created_at', { auth: false });
     const results = data.results || data;
-
-    try { buildBreakingTicker(results); } catch (e) { console.error('ticker failed (non-fatal)', e); }
 
     const featured = results.filter((l) => l.featured);
     heroListings = (featured.length ? featured : results).slice(0, 5);

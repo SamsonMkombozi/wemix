@@ -19,6 +19,7 @@ urlpatterns = [
     path("me/deactivate/", views.DeactivateAccountView.as_view(), name="deactivate"),
     path("password-reset/request/", views.PasswordResetRequestView.as_view(), name="password-reset-request"),
     path("password-reset/confirm/", views.PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
+    path("search/", views.PublicSellerSearchView.as_view(), name="public-seller-search"),
     path("users/", views.UserListView.as_view(), name="user-list"),
     path("users/<uuid:pk>/", views.UserDetailView.as_view(), name="user-detail"),
     path("users/<uuid:user_id>/moderate/", views.UserModerateView.as_view(), name="user-moderate"),

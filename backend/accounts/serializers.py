@@ -126,6 +126,28 @@ class UserSerializer(serializers.ModelSerializer):
         ]
 
 
+class PublicSellerSearchSerializer(serializers.ModelSerializer):
+    """Public, unauthenticated-safe view of a seller-type account for the
+    marketplace search bar -- deliberately a small allowlist (no email,
+    phone, KYC status, or anything else that isn't already meant to be
+    public), the same restraint UserSerializer/ModeratorUserSerializer
+    apply for their own audiences."""
+
+    listing_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "username", "organization_name", "role", "avatar", "bio",
+            "is_verified_badge", "trust_score", "listing_count",
+        ]
+
+    def get_listing_count(self, obj):
+        from news.models import NewsListing
+
+        return obj.news_listings.filter(status=NewsListing.ListingStatus.PUBLISHED).count()
+
+
 class ModeratorUserSerializer(serializers.ModelSerializer):
     """Fuller user view for moderator/admin management -- includes
     moderation-relevant fields the self-facing UserSerializer
