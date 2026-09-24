@@ -1,4 +1,4 @@
-# Habari Platform — Frontend
+# WEMIX — Frontend
 
 Plain HTML5 + CSS3 + JavaScript frontend (no build step, no framework —
 matches the original quotation's stated tech stack). Talks to the Django

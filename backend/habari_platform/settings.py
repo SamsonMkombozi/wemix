@@ -1,5 +1,7 @@
 """
-Django settings for the WEMIX (Habari Platform) project.
+Django settings for the WEMIX project (the Django project package itself is
+still named `habari_platform`, its original working name, purely for
+historical/internal reasons -- the brand shown everywhere else is WEMIX).
 
 Environment-driven configuration: every value that changes between
 local/staging/production is read from the environment (via a .env file

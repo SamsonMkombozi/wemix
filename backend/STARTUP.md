@@ -1,4 +1,4 @@
-# Starting the Habari Platform Backend
+# Starting the WEMIX Backend
 
 Two sets of steps below: **first-time setup** (only needed once per
 machine) and **daily startup** (every time you sit down to work on it).

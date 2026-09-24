@@ -1,6 +1,6 @@
-# Habari Platform — Backend Foundation
+# WEMIX — Backend Foundation
 
-Django 5.2 backend for the Habari Platform: a secure, AI-verified news
+Django 5.2 backend for WEMIX: a secure, AI-verified news
 marketplace for Tanzania. This is the **models/backend foundation** —
 custom user + KYC, news marketplace, AI verification, Selcom payments,
 wallets/commission, and moderation/anti-circumvention — wired up, migrated,

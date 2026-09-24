@@ -1,4 +1,4 @@
-# Habari Platform
+# WEMIX
 
 Full project: Django REST API backend + static HTML/CSS/JS frontend.
 
