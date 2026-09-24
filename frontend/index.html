@@ -44,17 +44,14 @@
      (css/style.css) -- see js/nav.js's topnav for the same pattern. */
   .wm-hidden { display: none !important; }
 
-  /* Main header (app bar) -- logo + account actions only. Search used to
-     live here; it now has its own row in .wm-toolbar directly below,
+  /* Main header (app bar) -- wordmark + account actions only. Search used
+     to live here; it now has its own row in .wm-toolbar directly below,
      combined with the category nav and breaking-news ticker -- see that
-     block's comment for why. */
+     block's comment for why. The wordmark itself (.wemix-wordmark) is
+     shared, defined once in css/style.css and reused everywhere the logo
+     appears across the whole system, not just this page. */
   .wm-main-header { background: #fff; border-bottom: 1px solid var(--wm-border); }
   .wm-main-header .container { display: flex; align-items: center; justify-content: space-between; padding-block: var(--space-4); gap: var(--space-6); flex-wrap: wrap; }
-  .wm-logo { display: flex; flex-direction: column; }
-  .wm-logo img { height: 38px; display: block; }
-  .wm-logo-fallback { font-family: 'Poppins', sans-serif; font-weight: 800; font-size: 1.7rem; letter-spacing: -0.02em; color: var(--wm-navy); }
-  .wm-logo-fallback span { color: var(--wm-blue); }
-  .wm-logo-tag { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--wm-muted); margin-top: var(--space-1); }
 
   .wm-header-actions { display: flex; align-items: center; gap: var(--space-5); }
   .wm-signin-btn { background: var(--wm-navy); color: #fff; border: none; padding: var(--space-3) var(--space-5); border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: inherit; }
@@ -219,11 +216,7 @@
 
 <header class="wm-main-header">
   <div class="container">
-    <a href="index.html" class="wm-logo">
-      <img src="images/wemix.jpeg" alt="WEMIX" onerror="this.style.display='none'; document.getElementById('wm-logo-fallback').style.display='block';">
-      <div id="wm-logo-fallback" class="wm-logo-fallback" style="display:none;">WEMIX</div>
-      <span class="wm-logo-tag">Global News Market</span>
-    </a>
+    <a href="index.html" class="wemix-wordmark" style="font-size:1.6rem;">WEMIX<span>.</span></a>
     <div class="wm-header-actions">
       <div id="wm-auth-area"></div>
     </div>
@@ -305,7 +298,7 @@
   <div class="container">
     <div class="wm-footer-grid">
       <div class="wm-footer-col">
-        <div class="wm-logo-fallback" style="color:#fff; font-size:1.4rem;">WEMIX<span>.</span></div>
+        <div class="wemix-wordmark on-dark" style="font-size:1.4rem;">WEMIX<span>.</span></div>
         <p style="font-size:0.8rem; color:rgba(255,255,255,0.55); margin: var(--space-2) 0 0 0;">Connecting Stories. Powering the World. Creating Impact.</p>
         <div id="wm-footer-social" style="margin-top: var(--space-3); font-size:0.8rem;"></div>
       </div>

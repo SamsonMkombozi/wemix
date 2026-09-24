@@ -23,7 +23,7 @@ function renderNav() {
     <nav class="topnav">
       <div class="topnav-inner container">
         <a href="index.html" class="brand">
-          <img src="images/wemix.jpeg" alt="Wemix" class="brand-logo">
+          <span class="wemix-wordmark">WEMIX<span>.</span></span>
         </a>
         <div class="nav-links">
           ${loggedIn ? `

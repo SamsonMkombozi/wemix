@@ -181,43 +181,23 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+/* WEMIX text wordmark -- the one brand mark used everywhere in the system
+   (topnav, homepage header/footer, auth pages), replacing the old
+   images/wemix.jpeg raster logo. Text color follows currentColor (so it
+   adapts to whatever the parent sets -- dark on a light header, white on
+   a dark panel); the trailing "." is always gold, the one fixed accent. */
+.wemix-wordmark {
   font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.25rem;
+  font-weight: 800;
+  font-size: 1.35rem;
   letter-spacing: -0.02em;
+  color: var(--color-black);
+  line-height: 1;
 }
-
-.brand-logo {
-  height: 40px;
-  max-width: 180px;
-  width: auto;
-  object-fit: contain;
-  display: block;
-}
-
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--color-black);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-gold);
-  font-weight: 700;
-  font-size: 0.9rem;
-  flex-shrink: 0;
-}
-
-.brand-tag {
-  color: var(--color-gold-dark);
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  display: block;
-  margin-top: -2px;
-}
+.wemix-wordmark span { color: var(--color-gold); }
+.wemix-wordmark.on-dark { color: #ffffff; }
 
 .nav-links {
   display: flex;
@@ -655,7 +635,6 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
   padding: var(--space-6) var(--space-10) 0;
 }
 
-.auth-form-topbar img { height: 34px; display: block; }
 .auth-form-topbar a.auth-back-link {
   font-size: 0.85rem;
   font-weight: 600;
@@ -1351,7 +1330,6 @@ footer {
 @media (max-width: 768px) {
   .topnav-inner { padding-block: var(--space-3); }
   .nav-links { gap: var(--space-2); }
-  .brand-tag { display: none; }
 
   .modal-body > div[style*="grid-template-columns:1fr 1fr"],
   .modal-body > div[style*="grid-template-columns: 1fr 1fr"] {
@@ -1441,10 +1419,10 @@ footer {
 }
 
 /* ===== Extra-small phones (<=380px) =====
-   Only container padding and the brand mark shrink further here --
-   type is already handled by the fluid clamp() scale, so nothing jumps. */
+   Only the wordmark shrinks a touch further here -- type elsewhere is
+   already handled by the fluid clamp() scale, so nothing else jumps. */
 @media (max-width: 380px) {
-  .brand-mark, .brand-logo { max-height: 32px; }
+  .wemix-wordmark { font-size: 1.2rem; }
 }
 
 /* ===== Print / very large desktops =====
