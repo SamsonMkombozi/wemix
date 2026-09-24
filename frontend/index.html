@@ -44,7 +44,10 @@
      (css/style.css) -- see js/nav.js's topnav for the same pattern. */
   .wm-hidden { display: none !important; }
 
-  /* Main header */
+  /* Main header (app bar) -- logo + account actions only. Search used to
+     live here; it now has its own row in .wm-toolbar directly below,
+     combined with the category nav and breaking-news ticker -- see that
+     block's comment for why. */
   .wm-main-header { background: #fff; border-bottom: 1px solid var(--wm-border); }
   .wm-main-header .container { display: flex; align-items: center; justify-content: space-between; padding-block: var(--space-4); gap: var(--space-6); flex-wrap: wrap; }
   .wm-logo { display: flex; flex-direction: column; }
@@ -53,39 +56,61 @@
   .wm-logo-fallback span { color: var(--wm-blue); }
   .wm-logo-tag { font-size: 0.62rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--wm-muted); margin-top: var(--space-1); }
 
-  .wm-search-wrap { flex: 1; min-width: 240px; max-width: 460px; display: flex; }
-  .wm-search-wrap input { flex: 1; border: 1px solid var(--wm-border); border-right: none; border-radius: 6px 0 0 6px; padding: var(--space-3) var(--space-4); font-size: 0.85rem; font-family: inherit; }
-  .wm-search-wrap select { border: 1px solid var(--wm-border); border-left: none; border-right: none; padding: var(--space-3) var(--space-3); font-size: 0.82rem; font-family: inherit; background: #fafafa; max-width: 130px; }
-  .wm-search-wrap button { border: none; background: var(--wm-navy); color: #fff; padding: 0 var(--space-4); border-radius: 0 6px 6px 0; cursor: pointer; }
-
   .wm-header-actions { display: flex; align-items: center; gap: var(--space-5); }
   .wm-signin-btn { background: var(--wm-navy); color: #fff; border: none; padding: var(--space-3) var(--space-5); border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; font-family: inherit; }
   .wm-signin-btn:hover { background: var(--wm-navy-2); }
   .wm-user-chip { display: flex; align-items: center; gap: var(--space-2); font-size: 0.85rem; font-weight: 600; }
   .wm-user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--wm-blue); color: var(--color-black); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; }
 
+  /* Toolbar -- one combined section directly below the app bar: a
+     full-width search row, then a row combining the category nav and the
+     breaking-news ticker side by side (stacked on narrow screens, where
+     there isn't room for both inline -- see the max-width: 900px rule
+     near the bottom of this block). Previously these were three separate
+     rows (search lived in the app bar; nav and breaking news were each
+     their own bar) -- now consolidated per request. */
+  .wm-toolbar-search-row { background: #fff; border-bottom: 1px solid var(--wm-border); padding-block: var(--space-4); }
+  .wm-search-wrap { display: flex; max-width: 640px; }
+  .wm-search-wrap input { flex: 1; border: 1px solid var(--wm-border); border-right: none; border-radius: 6px 0 0 6px; padding: var(--space-3) var(--space-4); font-size: 0.85rem; font-family: inherit; }
+  .wm-search-wrap select { border: 1px solid var(--wm-border); border-left: none; border-right: none; padding: var(--space-3) var(--space-3); font-size: 0.82rem; font-family: inherit; background: #fafafa; max-width: 130px; }
+  .wm-search-wrap button { border: none; background: var(--wm-navy); color: #fff; padding: 0 var(--space-4); border-radius: 0 6px 6px 0; cursor: pointer; }
+
+  .wm-toolbar-nav-row { background: var(--wm-navy); }
+  .wm-toolbar-nav-row .container { display: flex; align-items: center; gap: var(--space-5); }
+
   /* Main nav */
-  .wm-main-nav { background: var(--wm-navy); }
-  .wm-main-nav .container { display: flex; align-items: center; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; }
-  .wm-main-nav .container::-webkit-scrollbar { display: none; }
+  .wm-main-nav-links { display: flex; align-items: center; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
+  .wm-main-nav-links::-webkit-scrollbar { display: none; }
   .wm-nav-link { color: rgba(255,255,255,0.8); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.03em; padding: var(--space-3) var(--space-4); white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
   .wm-nav-link:hover, .wm-nav-link.active { color: #fff; border-bottom-color: var(--wm-red); }
-  .wm-nav-more { position: relative; margin-left: auto; flex-shrink: 0; }
-  .wm-nav-more-dropdown { display: none; position: absolute; top: 100%; right: 0; background: #fff; border: 1px solid var(--wm-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 180px; z-index: 20; padding: var(--space-2) 0; }
+  .wm-nav-more { position: relative; flex-shrink: 0; }
+  .wm-nav-more-dropdown { display: none; position: absolute; top: 100%; left: 0; background: #fff; border: 1px solid var(--wm-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 180px; z-index: 20; padding: var(--space-2) 0; }
   .wm-nav-more-dropdown.wm-open { display: block; }
   .wm-nav-more-dropdown .wm-nav-link { display: block; color: var(--wm-text); padding: var(--space-2) var(--space-4); border-bottom: none; }
   .wm-nav-more-dropdown .wm-nav-link:hover { color: var(--wm-blue); }
 
-  /* Breaking ticker */
-  .wm-breaking-bar { background: #fff; border-bottom: 1px solid var(--wm-border); display: flex; align-items: stretch; }
-  .wm-breaking-tag { background: var(--wm-red); color: var(--color-black); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.05em; padding: var(--space-2) var(--space-4); display: flex; align-items: center; white-space: nowrap; }
-  .wm-breaking-track-wrap { flex: 1; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 0 var(--space-4); }
-  .wm-breaking-track { font-size: 0.8rem; color: var(--wm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Breaking ticker -- now docked to the right of the nav row (navy
+     background), so its colors are inverted from the old white-bar
+     version: light ticker text instead of dark, translucent-white
+     prev/next buttons instead of navy-on-navy (which would've been
+     invisible against this row's background). */
+  .wm-breaking-inline { flex: 0 0 340px; min-width: 0; display: flex; align-items: center; gap: var(--space-3); border-left: 1px solid rgba(255,255,255,0.15); padding-left: var(--space-5); }
+  .wm-breaking-tag { background: var(--wm-red); color: var(--color-black); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.05em; padding: var(--space-1) var(--space-3); border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+  .wm-breaking-track-wrap { flex: 1; min-width: 0; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  .wm-breaking-track { font-size: 0.8rem; color: rgba(255,255,255,0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wm-breaking-track span:not(:last-child)::after { content: '•'; margin: 0 var(--space-4); color: var(--wm-red); }
   .wm-breaking-nav { display: flex; gap: var(--space-2); flex-shrink: 0; }
-  .wm-breaking-nav button { width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--wm-navy); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+  .wm-breaking-nav button { width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+  .wm-breaking-nav button:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
   .wm-breaking-nav button:disabled { opacity: 0.35; cursor: default; }
   .wm-breaking-nav svg { width: 12px; height: 12px; }
+
+  /* Below ~900px there's no room for nav links and the breaking ticker
+     side by side -- stack them instead of squeezing both into one row. */
+  @media (max-width: 900px) {
+    .wm-toolbar-nav-row .container { flex-wrap: wrap; padding-block: var(--space-2); }
+    .wm-breaking-inline { border-left: none; padding-left: 0; flex-basis: 100%; padding-block: var(--space-2) 0; border-top: 1px solid rgba(255,255,255,0.15); margin-top: var(--space-2); padding-top: var(--space-3); }
+  }
 
   /* Sections -- padding-block only (vertical rhythm between sections).
      A plain `padding: X 0` shorthand here would also zero out left/right,
@@ -199,40 +224,48 @@
       <div id="wm-logo-fallback" class="wm-logo-fallback" style="display:none;">WEMIX</div>
       <span class="wm-logo-tag">Global News Market</span>
     </a>
-    <div class="wm-search-wrap">
-      <input type="text" id="wm-search-input" placeholder="Search news, topics, countries&hellip;">
-      <select id="wm-search-category"><option value="">All Categories</option></select>
-      <button id="wm-search-btn" aria-label="Search">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      </button>
-    </div>
     <div class="wm-header-actions">
       <div id="wm-auth-area"></div>
     </div>
   </div>
 </header>
 
-<nav class="wm-main-nav">
-  <div class="container">
-    <span class="wm-nav-link active" id="wm-nav-home">Home</span>
-    <span class="wm-nav-link" data-cat="" data-latest="1">Latest</span>
-    <div id="wm-nav-links" style="display:contents;"></div>
-    <div class="wm-nav-more wm-hidden" id="wm-nav-more">
-      <span class="wm-nav-link" id="wm-nav-more-toggle">More ▾</span>
-      <div class="wm-nav-more-dropdown" id="wm-nav-more-dropdown"></div>
+<div class="wm-toolbar">
+  <div class="wm-toolbar-search-row">
+    <div class="container">
+      <div class="wm-search-wrap">
+        <input type="text" id="wm-search-input" placeholder="Search news, topics, countries&hellip;">
+        <select id="wm-search-category"><option value="">All Categories</option></select>
+        <button id="wm-search-btn" aria-label="Search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+      </div>
     </div>
   </div>
-</nav>
 
-<div class="wm-breaking-bar">
-  <div class="wm-breaking-tag">BREAKING NEWS</div>
-  <div class="wm-breaking-track-wrap">
-    <div class="wm-breaking-track" id="wm-breaking-track"></div>
-    <div class="wm-breaking-nav">
-      <button id="wm-breaking-prev" aria-label="Previous headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
-      <button id="wm-breaking-next" aria-label="Next headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+  <nav class="wm-toolbar-nav-row">
+    <div class="container">
+      <div class="wm-main-nav-links">
+        <span class="wm-nav-link active" id="wm-nav-home">Home</span>
+        <span class="wm-nav-link" data-cat="" data-latest="1">Latest</span>
+        <div id="wm-nav-links" style="display:contents;"></div>
+        <div class="wm-nav-more wm-hidden" id="wm-nav-more">
+          <span class="wm-nav-link" id="wm-nav-more-toggle">More ▾</span>
+          <div class="wm-nav-more-dropdown" id="wm-nav-more-dropdown"></div>
+        </div>
+      </div>
+      <div class="wm-breaking-inline">
+        <div class="wm-breaking-tag">BREAKING NEWS</div>
+        <div class="wm-breaking-track-wrap">
+          <div class="wm-breaking-track" id="wm-breaking-track"></div>
+          <div class="wm-breaking-nav">
+            <button id="wm-breaking-prev" aria-label="Previous headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button id="wm-breaking-next" aria-label="Next headlines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
+  </nav>
 </div>
 
 <main>
