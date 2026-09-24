@@ -87,8 +87,18 @@
   .wm-breaking-nav button:disabled { opacity: 0.35; cursor: default; }
   .wm-breaking-nav svg { width: 12px; height: 12px; }
 
-  /* Sections */
-  .wm-section { padding: var(--space-8) 0; }
+  /* Sections -- padding-block only (vertical rhythm between sections).
+     A plain `padding: X 0` shorthand here would also zero out left/right,
+     unconditionally overriding .container's padding-inline (the shared
+     responsive side-gutter every page uses) on every element that carries
+     both classes -- which is every section on this page. That's exactly
+     what was happening: at wide widths the two-column hero+latest-news
+     grid's own margins happened to redistribute the lost gutter back to
+     roughly the right place, hiding the bug, but at narrower widths
+     (tablet/mobile) every section below the header visibly ran flush to
+     the screen edge while the header/nav above it (no .wm-section class)
+     kept their padding -- the exact "doesn't start together" symptom. */
+  .wm-section { padding-block: var(--space-8); }
   .wm-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
   .wm-section-title { font-size: 0.95rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wm-text); }
   .wm-view-all { font-size: 0.78rem; font-weight: 600; color: var(--wm-blue); }

@@ -454,7 +454,15 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
 /* Grids / layout                                                         */
 /* ---------------------------------------------------------------------- */
 
-.section { padding: var(--space-10) 0; }
+/* padding-block only, not the padding: X 0 shorthand -- see the matching
+   comment on index.html's .wm-section for why: a shorthand here would
+   unconditionally zero out .container's padding-inline (the shared side
+   gutter) on every page's <main class="container section">, at every
+   breakpoint. That was live on dashboard/moderator/listing/terms/page.html:
+   their content sat flush against the screen edge while the topnav above
+   them kept its padding -- confirmed via computed styles (0px vs. 64px at
+   1440px) before this fix. */
+.section { padding-block: var(--space-10); }
 
 .grid {
   display: grid;
