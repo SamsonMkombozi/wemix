@@ -1708,7 +1708,7 @@ async function renderPlatformWallet(content) {
       </div>
       <h4 style="margin-bottom: var(--space-3);">Recent ledger entries</h4>
       ${data.recent_entries.length ? data.recent_entries.map((e) => `
-        <div class="table-row">
+        <div class="table-row" style="grid-template-columns: 150px 100px 170px minmax(0,1fr) 70px;">
           <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
           <span>${money(e.amount)}</span>
           <span class="text-muted">balance after: ${money(e.balance_after)}</span>
@@ -1975,7 +1975,7 @@ async function renderSettingsTab(content) {
       const logData = await apiFetch('/api/audit-log/');
       const logResults = logData.results || logData;
       auditArea.innerHTML = logResults.length ? logResults.slice(0, 50).map((e) => `
-        <div class="table-row">
+        <div class="table-row" style="grid-template-columns: 140px 120px 100px minmax(0,1fr) 70px;">
           <span>${escapeHtml((e.action || '').replace(/_/g, ' '))}</span>
           <span class="text-muted">${escapeHtml(e.actor_username || 'system')}</span>
           <span class="text-muted">${escapeHtml(e.target_model || '')}</span>
