@@ -1696,7 +1696,13 @@ async function renderWithdrawalsQueue(content) {
   }
 }
 
-const LEDGER_COLS = '150px 110px 130px minmax(0,1fr) 70px';
+// Description leads (the one genuinely distinguishing value per row --
+// "commission credit" repeats on almost every row and tells you nothing
+// on its own), matching the same "first column is the identifying value"
+// convention every other list in this file follows (see the .table-row
+// mobile-layout comment in css/style.css) -- entry type/amount/balance/
+// time all follow as supporting metadata instead of leading with it.
+const LEDGER_COLS = 'minmax(0,1fr) 140px 100px 130px 70px';
 
 async function renderPlatformWallet(content) {
   try {
@@ -1711,10 +1717,10 @@ async function renderPlatformWallet(content) {
       <h4 style="margin-bottom: var(--space-3);">Recent ledger entries</h4>
       ${data.recent_entries.length ? `
         <div class="ledger-table-header" style="grid-template-columns: ${LEDGER_COLS};">
+          <span>Description</span>
           <span>Type</span>
           <span style="text-align:right;">Amount</span>
           <span style="text-align:right;">Balance after</span>
-          <span>Description</span>
           <span>When</span>
         </div>
         ${data.recent_entries.map((e) => {
@@ -1723,10 +1729,10 @@ async function renderPlatformWallet(content) {
           const color = amt < 0 ? 'var(--color-danger)' : 'var(--color-success)';
           return `
           <div class="table-row" style="grid-template-columns: ${LEDGER_COLS};">
-            <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
+            <span class="ledger-desc" title="${escapeHtml(e.description || '')}">${escapeHtml(e.description || (e.entry_type || '').replace(/_/g, ' '))}</span>
+            <span class="text-muted">${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
             <span style="text-align:right; font-weight:600; color:${color};">${sign}${money(e.amount)}</span>
             <span style="text-align:right;" class="text-muted ledger-balance">${money(e.balance_after)}</span>
-            <span class="text-muted ledger-desc" title="${escapeHtml(e.description || '')}">${escapeHtml(e.description || '')}</span>
             <span class="text-muted">${timeAgo(e.created_at)}</span>
           </div>
         `;
@@ -1990,15 +1996,24 @@ async function renderSettingsTab(content) {
     try {
       const logData = await apiFetch('/api/audit-log/');
       const logResults = logData.results || logData;
-      auditArea.innerHTML = logResults.length ? logResults.slice(0, 50).map((e) => `
-        <div class="table-row" style="grid-template-columns: 140px 120px 100px minmax(0,1fr) 70px;">
-          <span>${escapeHtml((e.action || '').replace(/_/g, ' '))}</span>
+      const AUDIT_COLS = 'minmax(0,1fr) 120px 120px 100px 70px';
+      auditArea.innerHTML = logResults.length ? `
+        <div class="ledger-table-header" style="grid-template-columns: ${AUDIT_COLS};">
+          <span>Description</span>
+          <span>Actor</span>
+          <span>Action</span>
+          <span>Target</span>
+          <span>When</span>
+        </div>
+        ${logResults.slice(0, 50).map((e) => `
+        <div class="table-row" style="grid-template-columns: ${AUDIT_COLS};">
+          <span class="ledger-desc" style="font-size:0.8rem;" title="${escapeHtml(e.description || '')}">${escapeHtml(e.description || (e.action || '').replace(/_/g, ' '))}</span>
           <span class="text-muted">${escapeHtml(e.actor_username || 'system')}</span>
+          <span class="text-muted">${escapeHtml((e.action || '').replace(/_/g, ' '))}</span>
           <span class="text-muted">${escapeHtml(e.target_model || '')}</span>
-          <span class="text-muted" style="font-size:0.8rem;">${escapeHtml(e.description || '')}</span>
           <span class="text-muted">${timeAgo(e.created_at)}</span>
         </div>
-      `).join('') : '<p class="text-muted">No activity logged yet.</p>';
+      `).join('')}` : '<p class="text-muted">No activity logged yet.</p>';
     } catch (err) {
       auditArea.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
     }
