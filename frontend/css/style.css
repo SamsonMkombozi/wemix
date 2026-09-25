@@ -1124,6 +1124,44 @@ h4 { font-size: clamp(1rem, 0.92rem + 0.35vw, 1.1rem); }
 
 .table-row:last-child { border-bottom: none; }
 
+/* Header row for a .table-row list that needs column labels (e.g. the
+   platform wallet's ledger entries) -- pass the same grid-template-columns
+   used by the data rows below it via inline style so header/data columns
+   always line up exactly. */
+.ledger-table-header {
+  display: grid;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Keeps every ledger row the same height regardless of description length
+   -- truncated with an ellipsis rather than wrapping, since a table reads
+   as organized when every row lines up; the full text is still available
+   via the title tooltip on hover. */
+.ledger-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  /* The mobile .table-row layout below switches to a stacked card (each
+     span on its own line), where column headers and single-line
+     truncation don't apply -- hide the header and let the description
+     wrap normally instead of clipping useful text on a narrow screen. */
+  .ledger-table-header { display: none; }
+  .ledger-desc { white-space: normal; overflow: visible; text-overflow: clip; }
+  /* The header (which normally labels this column "Balance after") is
+     hidden on mobile, so spell it out inline instead. */
+  .ledger-balance::before { content: "balance: "; }
+}
+
 .empty-state {
   text-align: center;
   padding: var(--space-10) var(--space-5);

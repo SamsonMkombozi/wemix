@@ -1696,6 +1696,8 @@ async function renderWithdrawalsQueue(content) {
   }
 }
 
+const LEDGER_COLS = '150px 110px 130px minmax(0,1fr) 70px';
+
 async function renderPlatformWallet(content) {
   try {
     const data = await apiFetch('/api/wallet/platform/');
@@ -1707,15 +1709,29 @@ async function renderPlatformWallet(content) {
         <p class="text-muted" style="font-size:0.85rem; margin-top: var(--space-2);">${data.commission_entries_last_30_days} commission entries in the last 30 days</p>
       </div>
       <h4 style="margin-bottom: var(--space-3);">Recent ledger entries</h4>
-      ${data.recent_entries.length ? data.recent_entries.map((e) => `
-        <div class="table-row" style="grid-template-columns: 150px 100px 170px minmax(0,1fr) 70px;">
-          <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
-          <span>${money(e.amount)}</span>
-          <span class="text-muted">balance after: ${money(e.balance_after)}</span>
-          <span class="text-muted">${escapeHtml(e.description || '')}</span>
-          <span class="text-muted">${timeAgo(e.created_at)}</span>
+      ${data.recent_entries.length ? `
+        <div class="ledger-table-header" style="grid-template-columns: ${LEDGER_COLS};">
+          <span>Type</span>
+          <span style="text-align:right;">Amount</span>
+          <span style="text-align:right;">Balance after</span>
+          <span>Description</span>
+          <span>When</span>
         </div>
-      `).join('') : '<p class="text-muted">No ledger entries yet.</p>'}
+        ${data.recent_entries.map((e) => {
+          const amt = Number(e.amount);
+          const sign = amt < 0 ? '' : '+';
+          const color = amt < 0 ? 'var(--color-danger)' : 'var(--color-success)';
+          return `
+          <div class="table-row" style="grid-template-columns: ${LEDGER_COLS};">
+            <span>${escapeHtml((e.entry_type || '').replace(/_/g, ' '))}</span>
+            <span style="text-align:right; font-weight:600; color:${color};">${sign}${money(e.amount)}</span>
+            <span style="text-align:right;" class="text-muted ledger-balance">${money(e.balance_after)}</span>
+            <span class="text-muted ledger-desc" title="${escapeHtml(e.description || '')}">${escapeHtml(e.description || '')}</span>
+            <span class="text-muted">${timeAgo(e.created_at)}</span>
+          </div>
+        `;
+        }).join('')}
+      ` : '<p class="text-muted">No ledger entries yet.</p>'}
     `;
   } catch (err) {
     content.innerHTML = `<div class="alert alert-error">${escapeHtml(formatApiError(err))}</div>`;
